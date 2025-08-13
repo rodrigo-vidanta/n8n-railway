@@ -1,6 +1,6 @@
-FROM node:18-alpine
+FROM node:20-alpine
 
-# Instalar solo las dependencias esenciales
+# Instalar dependencias esenciales
 RUN apk add --no-cache python3 make g++
 
 # Instalar n8n y xlsx globalmente
@@ -11,7 +11,7 @@ ENV NODE_FUNCTION_ALLOW_EXTERNAL=xlsx
 ENV N8N_HOST=0.0.0.0
 ENV N8N_PORT=5678
 
-# Usuario por defecto de node:18-alpine
+# Usuario por defecto
 USER node
 WORKDIR /home/node
 
