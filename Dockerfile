@@ -1,25 +1,20 @@
 FROM n8nio/n8n
 
-# Cambiar a root para modificaciones
+# Cambiar a root
 USER root
 
-# Instalar xlsx en múltiples ubicaciones para asegurar compatibilidad
-RUN npm install -g xlsx && \
-    cd /usr/local/lib/node_modules/n8n && \
-    npm install xlsx && \
-    cd /home/node && \
-    npm install xlsx
+# Instalar xlsx globalmente primero
+RUN npm install -g xlsx
 
-# También instalarlo en el directorio del task-runner
-RUN cd /usr/local/lib/node_modules/n8n/node_modules/.pnpm && \
-    find . -name "task-runner*" -type d -exec sh -c 'cd "$1" && npm install xlsx' _ {} \; || true
+# Copiar xlsx al directorio de n8n usando enlaces simbólicos
+RUN mkdir -p /usr/local/lib/node_modules/n8n/node_modules && \
+    ln -sf /usr/local/lib/node_modules/xlsx /usr/local/lib/node_modules/n8n/node_modules/xlsx
 
-# Crear enlace simbólico global
-RUN ln -sf /usr/local/lib/node_modules/xlsx /usr/local/lib/node_modules/n8n/node_modules/xlsx || true
+# También crear enlace en el home del usuario node
+RUN mkdir -p /home/node/node_modules && \
+    ln -sf /usr/local/lib/node_modules/xlsx /home/node/node_modules/xlsx
 
 # Volver a usuario node
 USER node
 
 EXPOSE 5678
-
-# Rebuild forzado - cambio 1
