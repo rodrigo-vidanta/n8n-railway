@@ -1,23 +1,22 @@
-FROM n8nio/n8n
+FROM node:18-alpine
 
-USER root
+# Instalar dependencias
+RUN apk add --no-cache python3 make g++ git
 
-# Instalar xlsx globalmente
-RUN npm install -g xlsx
+# Crear usuario
+RUN addgroup -g 1000 node && adduser -u 1000 -G node -s /bin/sh -D node
 
-# Encontrar e instalar xlsx en el directorio específico del task-runner
-RUN cd /usr/local/lib/node_modules/n8n/node_modules/.pnpm && \
-    find . -name "*task-runner*" -type d | head -1 | xargs -I {} sh -c 'cd "{}" && mkdir -p node_modules && cp -r /usr/local/lib/node_modules/xlsx node_modules/' || \
-    echo "Task runner directory not found, trying alternative approach"
+# Instalar n8n y xlsx
+RUN npm install -g n8n xlsx
 
-# Crear enlace directo en el path que muestra el error
-RUN mkdir -p "/usr/local/lib/node_modules/n8n/node_modules/.pnpm/@n8n+task-runner@file+packages+@n8n+task-runner_@opentelemetry+api@1.9.0_@opentelemetry_4ae381f08d5de33c403d45aa26683c87/node_modules" && \
-    cp -r /usr/local/lib/node_modules/xlsx "/usr/local/lib/node_modules/n8n/node_modules/.pnpm/@n8n+task-runner@file+packages+@n8n+task-runner_@opentelemetry+api@1.9.0_@opentelemetry_4ae381f08d5de33c403d45aa26683c87/node_modules/" || \
-    echo "Specific path not found"
-
-# Enlaces adicionales
-RUN ln -sf /usr/local/lib/node_modules/xlsx /usr/local/lib/node_modules/n8n/node_modules/xlsx 2>/dev/null || true
+# Variables de entorno
+ENV NODE_FUNCTION_ALLOW_EXTERNAL=xlsx
+ENV N8N_HOST=0.0.0.0
+ENV N8N_PORT=5678
 
 USER node
+WORKDIR /home/node
 
 EXPOSE 5678
+
+CMD ["n8n", "start"]
