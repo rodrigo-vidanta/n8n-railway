@@ -29,9 +29,14 @@ const sdk = new NodeSDK({
   instrumentations: [
     getNodeAutoInstrumentations({
       '@opentelemetry/instrumentation-fs': { enabled: false },
-      '@opentelemetry/instrumentation-http': { enabled: false }, // Reduced logging
+      '@opentelemetry/instrumentation-http': { enabled: false },
       '@opentelemetry/instrumentation-express': { enabled: false },
-      '@opentelemetry/instrumentation-net': { enabled: false }
+      '@opentelemetry/instrumentation-net': { enabled: false },
+      '@opentelemetry/instrumentation-dns': { enabled: false },
+      '@opentelemetry/instrumentation-pg': { enabled: false },
+      '@opentelemetry/instrumentation-mysql': { enabled: false },
+      '@opentelemetry/instrumentation-mysql2': { enabled: false },
+      '@opentelemetry/instrumentation-redis': { enabled: false }
     })
   ],
 });
