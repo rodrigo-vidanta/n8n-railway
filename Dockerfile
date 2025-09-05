@@ -20,7 +20,7 @@ WORKDIR /opt/otel
 # Create package.json for our OpenTelemetry dependencies
 RUN cat > package.json <<'EOF'
 {
-  "name": "n8n-otel-deps",
+  "name": "n8n-otel-langfuse",
   "version": "1.0.0",
   "dependencies": {
     "@opentelemetry/api": "^1.9.0",
@@ -31,8 +31,6 @@ RUN cat > package.json <<'EOF'
     "@opentelemetry/resources": "^1.25.1",
     "@opentelemetry/semantic-conventions": "^1.25.1",
     "@opentelemetry/instrumentation": "^0.52.1",
-    "@opentelemetry/instrumentation-winston": "^0.39.0",
-    "@opentelemetry/winston-transport": "^0.4.0",
     "@opentelemetry/context-async-hooks": "^1.25.1",
     "winston": "^3.13.1",
     "flat": "^6.0.1"
@@ -40,119 +38,16 @@ RUN cat > package.json <<'EOF'
 }
 EOF
 
-# Install OpenTelemetry dependencies in our separate directory
+# Install OpenTelemetry dependencies
 RUN npm install --production
 
 # Copy node_modules to global location for access
 RUN cp -r node_modules/* /usr/local/lib/node_modules/
 
-# Switch to n8n's installation directory for our instrumentation files
+# Switch to n8n's installation directory
 WORKDIR /usr/local/lib/node_modules/n8n
 
-# Create instrumentation files with proper syntax
-RUN cat > tracing-langfuse.js <<'EOF'
-"use strict";
-
-// Only enable async context propagation if not already enabled
-const { context } = require("@opentelemetry/api");
-try {
-  const { AsyncHooksContextManager } = require("@opentelemetry/context-async-hooks");
-  const activeManager = context._getContextManager();
-  if (!activeManager || activeManager.constructor.name === 'NoopContextManager') {
-    const contextManager = new AsyncHooksContextManager();
-    context.setGlobalContextManager(contextManager.enable());
-    console.log("✅ Async context manager enabled");
-  } else {
-    console.log("ℹ️ Context manager already active:", activeManager.constructor.name);
-  }
-} catch (error) {
-  console.log("⚠️ Failed to setup context manager:", error.message);
-}
-
-const opentelemetry = require("@opentelemetry/sdk-node");
-const { OTLPTraceExporter } = require("@opentelemetry/exporter-trace-otlp-http");
-const { OTLPLogExporter } = require("@opentelemetry/exporter-logs-otlp-http");
-const { getNodeAutoInstrumentations } = require("@opentelemetry/auto-instrumentations-node");
-const { registerInstrumentations } = require("@opentelemetry/instrumentation");
-const { Resource } = require("@opentelemetry/resources");
-const { SemanticResourceAttributes } = require("@opentelemetry/semantic-conventions");
-const setupN8nOpenTelemetry = require("./n8n-otel-instrumentation-langfuse");
-const winston = require("winston");
-
-console.log("🚀 Configuring OpenTelemetry SDK for Langfuse...");
-console.log("📡 Endpoint:", process.env.LANGFUSE_BASEURL + "/api/public/ingestion");
-
-const logger = winston.createLogger({
-  level: "info",
-  format: winston.format.json(),
-  transports: [new winston.transports.Console()],
-});
-
-// Setup basic instrumentations
-const autoInstrumentations = getNodeAutoInstrumentations({
-  "@opentelemetry/instrumentation-dns": { enabled: false },
-  "@opentelemetry/instrumentation-net": { enabled: false },
-  "@opentelemetry/instrumentation-tls": { enabled: false },
-  "@opentelemetry/instrumentation-fs": { enabled: false },
-  "@opentelemetry/instrumentation-http": { enabled: true },
-  "@opentelemetry/instrumentation-express": { enabled: true },
-  "@opentelemetry/instrumentation-pg": {
-    enhancedDatabaseReporting: true,
-  }
-});
-
-registerInstrumentations({
-  instrumentations: [autoInstrumentations],
-});
-
-// Setup n8n specific instrumentation (manual patching)
-setupN8nOpenTelemetry();
-
-// Configure Langfuse headers (using string concatenation instead of template literals)
-const langfuseHeaders = {
-  'Authorization': 'Bearer ' + process.env.LANGFUSE_SECRET_KEY,
-  'x-langfuse-public-key': process.env.LANGFUSE_PUBLIC_KEY
-};
-
-// Initialize SDK only if environment variables are present
-if (process.env.LANGFUSE_SECRET_KEY && process.env.LANGFUSE_PUBLIC_KEY) {
-  try {
-    const sdk = new opentelemetry.NodeSDK({
-      resource: new Resource({
-        [SemanticResourceAttributes.SERVICE_NAME]: process.env.OTEL_SERVICE_NAME || "n8n-langfuse",
-        [SemanticResourceAttributes.SERVICE_VERSION]: "1.0.0",
-        'langfuse.version': '1.0',
-        'deployment.environment': 'railway'
-      }),
-      traceExporter: new OTLPTraceExporter({
-        url: process.env.LANGFUSE_BASEURL + "/api/public/ingestion",
-        headers: langfuseHeaders,
-      }),
-      instrumentations: [], // Already registered above
-    });
-
-    // Start SDK
-    sdk.start();
-    console.log("🎯 OpenTelemetry SDK started with Langfuse integration");
-  } catch (error) {
-    console.log("⚠️ Failed to start SDK:", error.message);
-    console.log("🔄 Continuing without SDK, manual instrumentation still active");
-  }
-} else {
-  console.log("⚠️ Langfuse credentials not provided, skipping SDK initialization");
-}
-
-// Error handling
-process.on("uncaughtException", async (err) => {
-  logger.error("Uncaught Exception", { error: err });
-  process.exit(1);
-});
-
-process.on("unhandledRejection", (reason, promise) => {
-  logger.error("Unhandled Promise Rejection", { error: reason });
-});
-EOF
-
+# Create n8n instrumentation file
 RUN cat > n8n-otel-instrumentation-langfuse.js <<'EOF'
 const { trace, context, SpanStatusCode, SpanKind } = require('@opentelemetry/api');
 const flat = require('flat');
@@ -162,14 +57,14 @@ function setupN8nOpenTelemetry() {
   try {
     const { WorkflowExecute } = require('n8n-core');
 
-    console.log("🔧 Setting up n8n manual instrumentation...");
+    console.log("🔧 Setting up n8n manual instrumentation for Langfuse...");
 
     // Workflow-level instrumentation
     const originalProcessRun = WorkflowExecute.prototype.processRunExecutionData;
     WorkflowExecute.prototype.processRunExecutionData = function (workflow) {
       const wfData = workflow || {};
-      const workflowId = wfData?.id ?? "unknown"
-      const workflowName = wfData?.name ?? "unknown"
+      const workflowId = wfData?.id ?? "unknown";
+      const workflowName = wfData?.name ?? "unknown";
 
       console.log("📊 Starting workflow: " + workflowName + " (" + workflowId + ")");
 
@@ -273,7 +168,8 @@ function setupN8nOpenTelemetry() {
         nodeName.toLowerCase().includes('gpt') ||
         nodeName.toLowerCase().includes('claude') ||
         nodeName.toLowerCase().includes('llama') ||
-        nodeName.toLowerCase().includes('langfuse');
+        nodeName.toLowerCase().includes('langfuse') ||
+        nodeType.includes('langchain');
 
       console.log("🔍 Processing node: " + nodeName + " (" + nodeType + ") - LLM: " + isLLMNode);
 
@@ -442,8 +338,129 @@ function setupN8nOpenTelemetry() {
 module.exports = setupN8nOpenTelemetry;
 EOF
 
+# Create main tracing file
+RUN cat > tracing-langfuse.js <<'EOF'
+"use strict";
+
+console.log("🔥 TRACING-LANGFUSE.JS LOADED!");
+console.log("🔍 LANGFUSE_BASEURL:", process.env.LANGFUSE_BASEURL);
+console.log("🔍 LANGFUSE_SECRET_KEY presente:", !!process.env.LANGFUSE_SECRET_KEY);
+console.log("🔍 LANGFUSE_PUBLIC_KEY presente:", !!process.env.LANGFUSE_PUBLIC_KEY);
+
+// Exit early if credentials are missing
+if (!process.env.LANGFUSE_SECRET_KEY || !process.env.LANGFUSE_PUBLIC_KEY || !process.env.LANGFUSE_BASEURL) {
+  console.log("⚠️ Langfuse credentials missing, skipping OpenTelemetry setup");
+  return;
+}
+
+// Enable async context propagation
+const { context } = require("@opentelemetry/api");
+try {
+  const { AsyncHooksContextManager } = require("@opentelemetry/context-async-hooks");
+  const activeManager = context._getContextManager();
+  if (!activeManager || activeManager.constructor.name === 'NoopContextManager') {
+    const contextManager = new AsyncHooksContextManager();
+    context.setGlobalContextManager(contextManager.enable());
+    console.log("✅ Async context manager enabled");
+  } else {
+    console.log("ℹ️ Context manager already active:", activeManager.constructor.name);
+  }
+} catch (error) {
+  console.log("⚠️ Failed to setup context manager:", error.message);
+}
+
+const opentelemetry = require("@opentelemetry/sdk-node");
+const { OTLPTraceExporter } = require("@opentelemetry/exporter-trace-otlp-http");
+const { getNodeAutoInstrumentations } = require("@opentelemetry/auto-instrumentations-node");
+const { registerInstrumentations } = require("@opentelemetry/instrumentation");
+const { Resource } = require("@opentelemetry/resources");
+const { SemanticResourceAttributes } = require("@opentelemetry/semantic-conventions");
+
+console.log("🚀 Configuring OpenTelemetry SDK for Langfuse...");
+
+// Calculate the correct endpoint based on Langfuse base URL
+const langfuseEndpoint = process.env.LANGFUSE_BASEURL + "/api/public/otel/v1/traces";
+console.log("📡 Endpoint:", langfuseEndpoint);
+
+// Create Basic Auth token (as per Langfuse documentation)
+const Buffer = require('buffer').Buffer;
+const authToken = Buffer.from(process.env.LANGFUSE_PUBLIC_KEY + ":" + process.env.LANGFUSE_SECRET_KEY).toString('base64');
+const langfuseHeaders = {
+  'Authorization': 'Basic ' + authToken
+};
+
+console.log("🔑 Headers configured with Basic Auth");
+
+// Setup basic instrumentations
+const autoInstrumentations = getNodeAutoInstrumentations({
+  "@opentelemetry/instrumentation-dns": { enabled: false },
+  "@opentelemetry/instrumentation-net": { enabled: false },
+  "@opentelemetry/instrumentation-tls": { enabled: false },
+  "@opentelemetry/instrumentation-fs": { enabled: false },
+  "@opentelemetry/instrumentation-http": { enabled: true },
+  "@opentelemetry/instrumentation-express": { enabled: true },
+  "@opentelemetry/instrumentation-pg": {
+    enhancedDatabaseReporting: true,
+  }
+});
+
+registerInstrumentations({
+  instrumentations: [autoInstrumentations],
+});
+
+try {
+  const traceExporter = new OTLPTraceExporter({
+    url: langfuseEndpoint,
+    headers: langfuseHeaders,
+  });
+
+  console.log("📤 OTLP Trace Exporter created");
+
+  const sdk = new opentelemetry.NodeSDK({
+    resource: new Resource({
+      [SemanticResourceAttributes.SERVICE_NAME]: process.env.OTEL_SERVICE_NAME || "n8n-langfuse",
+      [SemanticResourceAttributes.SERVICE_VERSION]: "1.0.0",
+      'langfuse.version': '1.0',
+      'deployment.environment': process.env.DEPLOYMENT_ENV || 'railway'
+    }),
+    traceExporter: traceExporter,
+    instrumentations: [], // Already registered above
+  });
+
+  // Start SDK
+  sdk.start();
+  console.log("🎯 OpenTelemetry SDK started with Langfuse integration");
+  
+  // Setup n8n specific instrumentation
+  const setupN8nOpenTelemetry = require("./n8n-otel-instrumentation-langfuse");
+  setupN8nOpenTelemetry();
+  
+} catch (error) {
+  console.log("❌ Failed to start SDK:", error.message);
+  console.log("Stack:", error.stack);
+}
+
+// Error handling
+process.on("uncaughtException", async (err) => {
+  console.error("Uncaught Exception", err);
+  process.exit(1);
+});
+
+process.on("unhandledRejection", (reason, promise) => {
+  console.error("Unhandled Promise Rejection", reason);
+});
+
+console.log("🎉 Tracing setup completed");
+EOF
+
+# Create entrypoint script
 RUN cat > docker-entrypoint-langfuse.sh <<'EOF'
 #!/bin/sh
+
+echo "🔧 Setting up n8n with Langfuse OpenTelemetry integration..."
+
+# Force trust proxy for Railway
+export N8N_TRUST_PROXY=true
 
 # Validation
 if [ -z "$LANGFUSE_SECRET_KEY" ]; then
@@ -454,11 +471,15 @@ if [ -z "$LANGFUSE_PUBLIC_KEY" ]; then
     echo "⚠️ LANGFUSE_PUBLIC_KEY not provided, continuing without Langfuse"
 fi
 
+if [ -z "$LANGFUSE_BASEURL" ]; then
+    echo "⚠️ LANGFUSE_BASEURL not provided, defaulting to US region"
+    export LANGFUSE_BASEURL="https://us.cloud.langfuse.com"
+fi
+
 # OpenTelemetry configuration for Langfuse
 export OTEL_SERVICE_NAME="${OTEL_SERVICE_NAME:-n8n-langfuse}"
-export OTEL_EXPORTER_OTLP_PROTOCOL="http/protobuf"
 export OTEL_LOG_LEVEL="${OTEL_LOG_LEVEL:-info}"
-export OTEL_RESOURCE_ATTRIBUTES="service.name=${OTEL_SERVICE_NAME},service.version=1.0.0,deployment.environment=railway"
+export OTEL_RESOURCE_ATTRIBUTES="service.name=${OTEL_SERVICE_NAME},service.version=1.0.0,deployment.environment=${DEPLOYMENT_ENV:-railway}"
 
 # Suppress duplicate registration warnings
 export OTEL_SUPPRESS_DUPLICATE_REGISTRATION=true
@@ -469,10 +490,11 @@ echo "========================================="
 echo "Service: $OTEL_SERVICE_NAME"
 echo "Langfuse: $LANGFUSE_BASEURL"
 echo "Log Level: $OTEL_LOG_LEVEL"
+echo "Trust Proxy: $N8N_TRUST_PROXY"
 echo "========================================="
 
 # Start n8n with OpenTelemetry
-echo "Starting n8n with manual OpenTelemetry instrumentation..."
+echo "Starting n8n with Langfuse OpenTelemetry instrumentation..."
 exec node --require /usr/local/lib/node_modules/n8n/tracing-langfuse.js /usr/local/bin/n8n "$@"
 EOF
 
@@ -481,9 +503,10 @@ RUN chmod +x docker-entrypoint-langfuse.sh && \
     chown node:node *.js *.sh
 
 # Environment variables
-ENV NODE_FUNCTION_ALLOW_EXTERNAL=xlsx,langfuse,langfuse-langchain,@opentelemetry/api,@opentelemetry/sdk-node,winston,flat
+ENV NODE_FUNCTION_ALLOW_EXTERNAL=xlsx,langfuse,@opentelemetry/api,@opentelemetry/sdk-node,winston,flat
 ENV N8N_HOST=0.0.0.0
 ENV N8N_PORT=5678
+ENV N8N_TRUST_PROXY=true
 
 # Default Langfuse configuration (override in Railway)
 ENV LANGFUSE_SECRET_KEY=""
@@ -494,6 +517,7 @@ ENV LANGFUSE_BASEURL="https://us.cloud.langfuse.com"
 ENV OTEL_SERVICE_NAME="n8n-langfuse-production"
 ENV OTEL_LOG_LEVEL="info"
 ENV OTEL_SUPPRESS_DUPLICATE_REGISTRATION="true"
+ENV DEPLOYMENT_ENV="railway"
 
 USER node
 WORKDIR /home/node
