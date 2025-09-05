@@ -2,6 +2,11 @@
   "name": "n8n-railway",
   "version": "1.0.0",
   "dependencies": {
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "langfuse": "^3.22.0",
+    "langfuse-langchain": "^3.22.0",
+    "opentelemetry-instrumentation-anthropic": "^0.1.0",
+    "openinference-instrumentation-vertexai": "^0.1.0",
+    "openinference-instrumentation-google-genai": "^0.1.0"
   }
 }
