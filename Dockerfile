@@ -343,6 +343,8 @@ RUN cat > tracing-langfuse.js <<'EOF'
 "use strict";
 
 console.log("🔥 TRACING-LANGFUSE.JS LOADED!");
+console.log("🔍 Working directory:", process.cwd());
+console.log("🔍 Node version:", process.version);
 console.log("🔍 LANGFUSE_BASEURL:", process.env.LANGFUSE_BASEURL);
 console.log("🔍 LANGFUSE_SECRET_KEY presente:", !!process.env.LANGFUSE_SECRET_KEY);
 console.log("🔍 LANGFUSE_PUBLIC_KEY presente:", !!process.env.LANGFUSE_PUBLIC_KEY);
@@ -350,6 +352,9 @@ console.log("🔍 LANGFUSE_PUBLIC_KEY presente:", !!process.env.LANGFUSE_PUBLIC_
 // Exit early if credentials are missing
 if (!process.env.LANGFUSE_SECRET_KEY || !process.env.LANGFUSE_PUBLIC_KEY || !process.env.LANGFUSE_BASEURL) {
   console.log("⚠️ Langfuse credentials missing, skipping OpenTelemetry setup");
+  console.log("Secret key:", !!process.env.LANGFUSE_SECRET_KEY);
+  console.log("Public key:", !!process.env.LANGFUSE_PUBLIC_KEY);  
+  console.log("Base URL:", !!process.env.LANGFUSE_BASEURL);
   return;
 }
 
