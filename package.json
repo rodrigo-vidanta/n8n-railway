@@ -18,8 +18,9 @@
     "@opentelemetry/context-async-hooks": "^1.25.1",
     "winston": "^3.13.1",
     "flat": "^6.0.1",
-    "opentelemetry-instrumentation-anthropic": "^0.1.0",
-    "openinference-instrumentation-vertexai": "^0.1.0",
-    "openinference-instrumentation-google-genai": "^0.1.0"
+    "@traceloop/instrumentation-anthropic": "^0.18.0",
+    "@traceloop/instrumentation-openai": "^0.18.0",
+    "@traceloop/instrumentation-bedrock": "^0.9.2",
+    "@traceloop/instrumentation-cohere": "^0.14.6"
   }
 }
