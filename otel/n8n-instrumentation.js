@@ -225,11 +225,12 @@ function setupN8nInstrumentation() {
             }
             
             const runData = result?.data?.resultData?.runData || {};
-            const nodes = wfData?.nodes || [];
+            const nodes = Array.isArray(wfData?.nodes) ? wfData.nodes : [];
             let llmNodeCount = 0;
             
             // Process nodes and create child spans
-            nodes.forEach((nodeData, index) => {
+            if (nodes.length > 0) {
+              nodes.forEach((nodeData, index) => {
               const nodeName = nodeData.name;
               const nodeRunData = runData[nodeName];
               
@@ -270,6 +271,7 @@ function setupN8nInstrumentation() {
                 }
               }
             });
+            }
 
             span.setAttributes({
               'langfuse.status': 'success',
