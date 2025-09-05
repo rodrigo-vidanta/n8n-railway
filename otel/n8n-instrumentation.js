@@ -9,10 +9,12 @@ function setupN8nInstrumentation() {
     console.log("🔧 Setting up n8n instrumentation for Langfuse...");
 
     // Helper function to detect AI system from model name
-    function detectAISystem(modelName) {
-      if (!modelName || modelName === 'unknown') return 'unknown';
-      const model = modelName.toLowerCase();
+    function detectAISystem(modelName, nodeType, nodeName) {
+      const model = (modelName || '').toLowerCase();
+      const type = (nodeType || '').toLowerCase();
+      const name = (nodeName || '').toLowerCase();
       
+      // Check in model name first
       if (model.includes('gpt') || model.includes('openai')) return 'openai';
       if (model.includes('claude') || model.includes('anthropic')) return 'anthropic';
       if (model.includes('gemini') || model.includes('google')) return 'google';
@@ -24,7 +26,15 @@ function setupN8nInstrumentation() {
       if (model.includes('vertex')) return 'vertex';
       if (model.includes('huggingface')) return 'huggingface';
       
-      return 'other';
+      // Check in node type and name
+      if (type.includes('anthropic') || name.includes('anthropic') || name.includes('claude')) return 'anthropic';
+      if (type.includes('openai') || name.includes('openai') || name.includes('gpt')) return 'openai';
+      if (type.includes('azure') || name.includes('azure')) return 'azure_openai';
+      if (type.includes('vertex') || type.includes('google') || name.includes('vertex') || name.includes('google')) return 'vertex';
+      if (type.includes('groq') || name.includes('groq')) return 'groq';
+      
+      // If we detected it as AI but can't determine system, return 'other'
+      return (!modelName || modelName === 'unknown') ? 'unknown' : 'other';
     }
 
     // Helper function to extract LLM data from node execution
@@ -37,16 +47,21 @@ function setupN8nInstrumentation() {
         const parameters = nodeData?.parameters || {};
 
         // Detect AI nodes by type or name
-        const aiIndicators = ['openai', 'anthropic', 'langchain', 'claude', 'gpt', 'azure', 'vertex', 'groq', 'llm', 'ai'];
+        const aiIndicators = ['openai', 'anthropic', 'langchain', 'claude', 'gpt', 'azure', 'vertex', 'groq', 'llm', 'ai', 'chat', 'completion'];
         const isAINode = aiIndicators.some(indicator => 
           nodeType.toLowerCase().includes(indicator) || 
           nodeName.toLowerCase().includes(indicator)
         );
 
+        // Debug: Log node detection
+        if (process.env.OTEL_LOG_LEVEL === 'debug') {
+          console.log(`Checking node: ${nodeName} (${nodeType}) - isAI: ${isAINode}`);
+        }
+
         if (isAINode) {
           // Extract model information
           llmData.model = parameters?.model || parameters?.options?.model || parameters?.modelName || 'unknown';
-          llmData.system = detectAISystem(llmData.model);
+          llmData.system = detectAISystem(llmData.model, nodeType, nodeName);
 
           // Extract input (prompts, messages)
           if (parameters?.prompt) {

@@ -10,7 +10,7 @@ console.log("🚀 Initializing OpenTelemetry for n8n with Langfuse...");
 const basicAuth = Buffer.from(`${process.env.LANGFUSE_PUBLIC_KEY}:${process.env.LANGFUSE_SECRET_KEY}`).toString('base64');
 
 const traceExporter = new OTLPTraceExporter({
-  url: `${process.env.LANGFUSE_BASEURL}/api/public/otel`,
+  url: `${process.env.LANGFUSE_BASEURL}/api/public/otel/v1/traces`,
   headers: {
     'Authorization': `Basic ${basicAuth}`
   },
@@ -26,19 +26,7 @@ const resource = new Resource({
 const sdk = new NodeSDK({
   resource: resource,
   traceExporter: traceExporter,
-  instrumentations: [
-    getNodeAutoInstrumentations({
-      '@opentelemetry/instrumentation-fs': { enabled: false },
-      '@opentelemetry/instrumentation-http': { enabled: false },
-      '@opentelemetry/instrumentation-express': { enabled: false },
-      '@opentelemetry/instrumentation-net': { enabled: false },
-      '@opentelemetry/instrumentation-dns': { enabled: false },
-      '@opentelemetry/instrumentation-pg': { enabled: false },
-      '@opentelemetry/instrumentation-mysql': { enabled: false },
-      '@opentelemetry/instrumentation-mysql2': { enabled: false },
-      '@opentelemetry/instrumentation-redis': { enabled: false }
-    })
-  ],
+  instrumentations: [] // Disable ALL auto-instrumentations
 });
 
 sdk.start();
