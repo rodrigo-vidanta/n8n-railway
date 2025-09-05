@@ -319,7 +319,10 @@ function setupN8nInstrumentation() {
                     console.log(`RunData structure for ${nodeName}:`, JSON.stringify({
                       runDataLength: nodeRunData.length,
                       firstRun: nodeRunData[0]?.data?.main ? 'has main data' : 'no main data',
-                      lastRun: nodeRunData[nodeRunData.length - 1]?.data?.main ? 'has main data' : 'no main data'
+                      lastRun: nodeRunData[nodeRunData.length - 1]?.data?.main ? 'has main data' : 'no main data',
+                      firstRunKeys: nodeRunData[0] ? Object.keys(nodeRunData[0]) : 'no first run',
+                      firstRunDataKeys: nodeRunData[0]?.data ? Object.keys(nodeRunData[0].data) : 'no data',
+                      sampleFirstRun: nodeRunData[0] ? JSON.stringify(nodeRunData[0]).substring(0, 500) : 'none'
                     }));
                   }
                 }
