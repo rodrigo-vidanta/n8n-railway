@@ -13,7 +13,8 @@ RUN echo "Installing system packages..." && \
     musl-dev \
     python3 \
     make \
-    g++
+    g++ \
+    tini
 
 # Copy package.json and install dependencies
 COPY package.json /tmp/package.json
@@ -40,7 +41,7 @@ RUN mkdir -p "/usr/local/lib/node_modules/n8n/node_modules/.pnpm/@n8n+task-runne
     echo "Specific pnpm path copy failed, continuing..."
 
 # Create OpenTelemetry instrumentation files
-RUN cat > tracing-langfuse.js << 'EOF'
+RUN cat > tracing-langfuse.js <<EOF
 "use strict";
 
 // Enable proper async context propagation globally
@@ -117,7 +118,7 @@ setupN8nOpenTelemetry();
 
 // Configure Langfuse headers
 const langfuseHeaders = {
-  'Authorization': `Bearer ${process.env.LANGFUSE_SECRET_KEY}`,
+  'Authorization': \`Bearer \${process.env.LANGFUSE_SECRET_KEY}\`,
   'x-langfuse-public-key': process.env.LANGFUSE_PUBLIC_KEY
 };
 
@@ -168,7 +169,7 @@ sdk.start();
 console.log("🎯 OpenTelemetry SDK started with Langfuse integration");
 EOF
 
-RUN cat > n8n-otel-instrumentation-langfuse.js << 'EOF'
+RUN cat > n8n-otel-instrumentation-langfuse.js <<EOF
 const { trace, context, SpanStatusCode, SpanKind } = require('@opentelemetry/api');
 const flat = require('flat');
 const tracer = trace.getTracer('n8n-langfuse-instrumentation', '1.0.0');
@@ -192,7 +193,7 @@ function setupN8nOpenTelemetry() {
         'n8n.service': 'workflow-engine',
         ...flat(wfData?.settings ?? {}, { 
           delimiter: '.', 
-          transformKey: (key) => `n8n.workflow.settings.${key}` 
+          transformKey: (key) => \`n8n.workflow.settings.\${key}\` 
         }),
       };
 
@@ -303,7 +304,7 @@ function setupN8nOpenTelemetry() {
       const flattenedNode = flat(node ?? {}, { delimiter: '.' });
       for (const [key, value] of Object.entries(flattenedNode)) {
         if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
-          nodeAttributes[`n8n.node.${key}`] = value;
+          nodeAttributes[\`n8n.node.\${key}\`] = value;
         }
       }
       
@@ -419,37 +420,37 @@ function setupN8nOpenTelemetry() {
 module.exports = setupN8nOpenTelemetry;
 EOF
 
-RUN cat > docker-entrypoint-langfuse.sh << 'EOF'
+RUN cat > docker-entrypoint-langfuse.sh <<EOF
 #!/bin/sh
 
 # Validation
-if [ -z "$LANGFUSE_SECRET_KEY" ]; then
+if [ -z "\$LANGFUSE_SECRET_KEY" ]; then
     echo "ERROR: LANGFUSE_SECRET_KEY is required"
     exit 1
 fi
 
-if [ -z "$LANGFUSE_PUBLIC_KEY" ]; then
+if [ -z "\$LANGFUSE_PUBLIC_KEY" ]; then
     echo "ERROR: LANGFUSE_PUBLIC_KEY is required"
     exit 1
 fi
 
 # OpenTelemetry configuration for Langfuse
-export OTEL_SERVICE_NAME="${OTEL_SERVICE_NAME:-n8n-langfuse}"
+export OTEL_SERVICE_NAME="\${OTEL_SERVICE_NAME:-n8n-langfuse}"
 export OTEL_EXPORTER_OTLP_PROTOCOL="http/protobuf"
-export OTEL_LOG_LEVEL="${OTEL_LOG_LEVEL:-info}"
-export OTEL_RESOURCE_ATTRIBUTES="service.name=${OTEL_SERVICE_NAME},service.version=1.0.0,deployment.environment=railway"
+export OTEL_LOG_LEVEL="\${OTEL_LOG_LEVEL:-info}"
+export OTEL_RESOURCE_ATTRIBUTES="service.name=\${OTEL_SERVICE_NAME},service.version=1.0.0,deployment.environment=railway"
 
 echo "========================================="
 echo "n8n + OpenTelemetry + Langfuse"
 echo "========================================="
-echo "Service: $OTEL_SERVICE_NAME"
-echo "Langfuse: $LANGFUSE_BASEURL"
-echo "Log Level: $OTEL_LOG_LEVEL"
+echo "Service: \$OTEL_SERVICE_NAME"
+echo "Langfuse: \$LANGFUSE_BASEURL"
+echo "Log Level: \$OTEL_LOG_LEVEL"
 echo "========================================="
 
 # Start n8n with OpenTelemetry
 echo "Starting n8n with full OpenTelemetry instrumentation..."
-exec node --require /usr/local/lib/node_modules/n8n/tracing-langfuse.js /usr/local/bin/n8n "$@"
+exec node --require /usr/local/lib/node_modules/n8n/tracing-langfuse.js /usr/local/bin/n8n "\$@"
 EOF
 
 # Make scripts executable and set ownership
