@@ -274,6 +274,8 @@ function setupN8nOpenTelemetry() {
                        nodeType.toLowerCase().includes('gemini') ||
                        nodeType.toLowerCase().includes('claude') ||
                        nodeType.toLowerCase().includes('vertex') ||
+                       nodeType.toLowerCase().includes('bedrock') ||
+                       nodeType.toLowerCase().includes('cohere') ||
                        nodeName.toLowerCase().includes('langfuse');
 
       const nodeAttributes = {
