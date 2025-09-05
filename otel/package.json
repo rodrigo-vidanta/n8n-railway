@@ -1,14 +1,17 @@
 {
   "name": "n8n-otel-langfuse",
   "version": "1.0.0",
-  "description": "OpenTelemetry integration for n8n with Langfuse",
   "dependencies": {
     "@opentelemetry/api": "^1.9.0",
     "@opentelemetry/sdk-node": "^0.52.1",
     "@opentelemetry/auto-instrumentations-node": "^0.49.1",
     "@opentelemetry/exporter-trace-otlp-http": "^0.52.1",
+    "@opentelemetry/exporter-logs-otlp-http": "^0.52.1",
     "@opentelemetry/resources": "^1.25.1",
     "@opentelemetry/semantic-conventions": "^1.25.1",
+    "@opentelemetry/instrumentation": "^0.52.1",
+    "@opentelemetry/context-async-hooks": "^1.25.1",
+    "winston": "^3.13.1",
     "flat": "^6.0.1"
   }
 }

@@ -29,7 +29,9 @@ const sdk = new NodeSDK({
   instrumentations: [
     getNodeAutoInstrumentations({
       '@opentelemetry/instrumentation-fs': { enabled: false },
-      '@opentelemetry/instrumentation-http': { enabled: true }
+      '@opentelemetry/instrumentation-http': { enabled: false }, // Reduced logging
+      '@opentelemetry/instrumentation-express': { enabled: false },
+      '@opentelemetry/instrumentation-net': { enabled: false }
     })
   ],
 });

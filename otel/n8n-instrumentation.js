@@ -8,24 +8,28 @@ function setupN8nInstrumentation() {
 
     console.log("🔧 Setting up n8n instrumentation for Langfuse...");
 
-    // Helper function to detect AI system from model name or node type
-    function detectAISystem(modelName, nodeType) {
-      const model = (modelName || '').toLowerCase();
-      const type = (nodeType || '').toLowerCase();
+    // Helper function to detect AI system from model name
+    function detectAISystem(modelName) {
+      if (!modelName || modelName === 'unknown') return 'unknown';
+      const model = modelName.toLowerCase();
       
-      if (model.includes('gpt') || model.includes('openai') || type.includes('openai')) return 'openai';
-      if (model.includes('azure') || type.includes('azure')) return 'azure_openai';
-      if (model.includes('claude') || model.includes('anthropic') || type.includes('anthropic')) return 'anthropic';
-      if (model.includes('gemini') || model.includes('vertex') || type.includes('vertex') || type.includes('google')) return 'vertex';
-      if (model.includes('groq') || type.includes('groq')) return 'groq';
-      if (model.includes('llama') || model.includes('mistral') || model.includes('opensource')) return 'opensource';
+      if (model.includes('gpt') || model.includes('openai')) return 'openai';
+      if (model.includes('claude') || model.includes('anthropic')) return 'anthropic';
+      if (model.includes('gemini') || model.includes('google')) return 'google';
+      if (model.includes('llama') || model.includes('meta')) return 'meta';
+      if (model.includes('azure')) return 'azure_openai';
+      if (model.includes('cohere')) return 'cohere';
+      if (model.includes('mistral')) return 'mistral';
+      if (model.includes('groq')) return 'groq';
+      if (model.includes('vertex')) return 'vertex';
+      if (model.includes('huggingface')) return 'huggingface';
       
-      return 'unknown';
+      return 'other';
     }
 
     // Helper function to extract LLM data from node execution
     function extractLLMData(nodeData, runData) {
-      const llmData = { model: null, input: null, output: null, system: null, tokens: null };
+      const llmData = { model: null, input: null, output: null, system: 'unknown', tokens: null };
 
       try {
         const nodeType = nodeData?.type || '';
@@ -41,8 +45,8 @@ function setupN8nInstrumentation() {
 
         if (isAINode) {
           // Extract model information
-          llmData.model = parameters?.model || parameters?.options?.model || parameters?.modelName;
-          llmData.system = detectAISystem(llmData.model, nodeType);
+          llmData.model = parameters?.model || parameters?.options?.model || parameters?.modelName || 'unknown';
+          llmData.system = detectAISystem(llmData.model);
 
           // Extract input (prompts, messages)
           if (parameters?.prompt) {
@@ -82,111 +86,101 @@ function setupN8nInstrumentation() {
           }
         }
       } catch (error) {
-        console.warn("⚠️ Error extracting LLM data:", error.message);
+        console.error("Error extracting LLM data:", error);
       }
 
       return llmData;
     }
 
-    // Helper function to set GenAI span attributes
+    // Helper function to set GenAI attributes on span
     function setGenAIAttributes(span, llmData, nodeData) {
-      if (llmData.system !== 'unknown') {
-        span.setAttributes({
-          'gen_ai.system': llmData.system,
-          'gen_ai.operation.name': 'chat',
-          'langfuse.observation.type': 'generation'
-        });
-
-        if (llmData.model) {
+      try {
+        // Basic GenAI attributes
+        if (llmData.system && llmData.system !== 'unknown') {
           span.setAttributes({
-            'gen_ai.request.model': llmData.model,
-            'gen_ai.response.model': llmData.model
+            'gen_ai.system': llmData.system,
+            'gen_ai.request.model': llmData.model || 'unknown'
           });
+
+          // Server attributes based on system
+          switch (llmData.system) {
+            case 'openai':
+              span.setAttributes({
+                'server.address': 'api.openai.com',
+                'server.port': 443
+              });
+              break;
+            case 'azure_openai':
+              span.setAttributes({
+                'server.address': 'cognitiveservices.azure.com',
+                'server.port': 443
+              });
+              break;
+            case 'anthropic':
+              span.setAttributes({
+                'server.address': 'api.anthropic.com',
+                'server.port': 443
+              });
+              break;
+            case 'vertex':
+              span.setAttributes({
+                'server.address': 'googleapis.com',
+                'server.port': 443
+              });
+              break;
+            case 'groq':
+              span.setAttributes({
+                'server.address': 'api.groq.com',
+                'server.port': 443
+              });
+              break;
+          }
         }
 
-        // Server attributes based on system
-        if (llmData.system === 'openai') {
-          span.setAttributes({
-            'server.address': 'api.openai.com',
-            'server.port': 443
-          });
-        } else if (llmData.system === 'azure_openai') {
-          span.setAttributes({
-            'server.port': 443
-          });
-        } else if (llmData.system === 'anthropic') {
-          span.setAttributes({
-            'server.address': 'api.anthropic.com',
-            'server.port': 443
-          });
-        } else if (llmData.system === 'vertex') {
-          span.setAttributes({
-            'server.address': 'generativelanguage.googleapis.com',
-            'server.port': 443
-          });
-        } else if (llmData.system === 'groq') {
-          span.setAttributes({
-            'server.address': 'api.groq.com',
-            'server.port': 443
-          });
-        }
-
+        // Input/Output
         if (llmData.input) {
           span.setAttributes({
-            'input.value': llmData.input,
-            'gen_ai.prompt.0.role': 'user',
-            'gen_ai.prompt.0.content': llmData.input
+            'gen_ai.prompt': llmData.input.substring(0, 1000) // Limit size
           });
         }
 
         if (llmData.output) {
           span.setAttributes({
-            'output.value': llmData.output,
-            'gen_ai.completion.0.role': 'assistant',
-            'gen_ai.completion.0.content': llmData.output
+            'gen_ai.completion': llmData.output.substring(0, 1000) // Limit size
           });
         }
 
-        // Updated token usage attributes (2024-2025 standard)
-        if (llmData.tokens && (llmData.tokens.input > 0 || llmData.tokens.output > 0)) {
+        // Token usage
+        if (llmData.tokens) {
           span.setAttributes({
-            'gen_ai.usage.input_tokens': llmData.tokens.input || 0,
-            'gen_ai.usage.output_tokens': llmData.tokens.output || 0,
-            'gen_ai.usage.total_tokens': (llmData.tokens.input || 0) + (llmData.tokens.output || 0)
+            'gen_ai.usage.input_tokens': llmData.tokens.input,
+            'gen_ai.usage.output_tokens': llmData.tokens.output
           });
         }
 
-        // Model parameters if available
-        const parameters = nodeData?.parameters || {};
-        if (parameters.temperature !== undefined) {
-          span.setAttributes({
-            'gen_ai.request.temperature': parameters.temperature
-          });
-        }
-        if (parameters.max_tokens !== undefined || parameters.maxTokens !== undefined) {
-          span.setAttributes({
-            'gen_ai.request.max_tokens': parameters.max_tokens || parameters.maxTokens
-          });
-        }
-        if (parameters.top_p !== undefined) {
-          span.setAttributes({
-            'gen_ai.request.top_p': parameters.top_p
-          });
-        }
-
-        // Cost information if available
-        if (llmData.cost) {
-          span.setAttributes({
-            'gen_ai.usage.cost': llmData.cost
-          });
+        // Model parameters from node configuration
+        if (nodeData?.parameters) {
+          const params = nodeData.parameters;
+          if (params.temperature !== undefined) {
+            span.setAttributes({ 'gen_ai.request.temperature': params.temperature });
+          }
+          if (params.max_tokens !== undefined || params.maxTokens !== undefined) {
+            span.setAttributes({ 
+              'gen_ai.request.max_tokens': params.max_tokens || params.maxTokens 
+            });
+          }
+          if (params.top_p !== undefined || params.topP !== undefined) {
+            span.setAttributes({ 
+              'gen_ai.request.top_p': params.top_p || params.topP 
+            });
+          }
+          if (params.stream !== undefined) {
+            span.setAttributes({ 'gen_ai.request.is_stream': params.stream });
+          }
         }
 
-        // Streaming detection
-        if (parameters.stream) {
-          span.setAttributes({
-            'gen_ai.request.is_stream': parameters.stream
-          });
-        }
+      } catch (error) {
+        console.error("Error setting GenAI attributes:", error);
       }
     }
 
@@ -194,18 +188,28 @@ function setupN8nInstrumentation() {
     const originalProcessRun = WorkflowExecute.prototype.processRunExecutionData;
     WorkflowExecute.prototype.processRunExecutionData = function (workflow) {
       const wfData = workflow || {};
-      const workflowName = wfData?.name ?? "unknown";
       const workflowId = wfData?.id ?? "unknown";
+      const workflowName = wfData?.name ?? "unknown";
 
-      console.log("📊 Starting workflow:", workflowName);
+      // Reduced logging - only log workflow starts in debug mode
+      if (process.env.OTEL_LOG_LEVEL === 'debug') {
+        console.log("📊 Starting workflow: " + workflowName + " (" + workflowId + ")");
+      }
+
+      const workflowAttributes = {
+        'langfuse.type': 'workflow',
+        'langfuse.name': workflowName,
+        'n8n.workflow.id': workflowId,
+        'n8n.workflow.name': workflowName,
+        'n8n.service': 'workflow-engine',
+        ...flat(wfData?.settings ?? {}, { 
+          delimiter: '.', 
+          transformKey: (key) => 'n8n.workflow.settings.' + key
+        }),
+      };
 
       const span = tracer.startSpan('n8n.workflow.execute', {
-        attributes: {
-          'langfuse.trace.name': workflowName,
-          'n8n.workflow.name': workflowName,
-          'n8n.workflow.id': workflowId,
-          'n8n.service': 'workflow-engine'
-        },
+        attributes: workflowAttributes,
         kind: SpanKind.INTERNAL
       });
 
@@ -215,13 +219,16 @@ function setupN8nInstrumentation() {
 
         cancelable.then(
           (result) => {
-            console.log("✅ Workflow completed successfully");
+            // Reduced logging - only log completions in debug mode
+            if (process.env.OTEL_LOG_LEVEL === 'debug') {
+              console.log("✅ Workflow completed successfully");
+            }
             
             const runData = result?.data?.resultData?.runData || {};
             const nodes = wfData?.nodes || [];
             let llmNodeCount = 0;
             
-            // Create child spans for each node execution
+            // Process nodes and create child spans
             nodes.forEach((nodeData, index) => {
               const nodeName = nodeData.name;
               const nodeRunData = runData[nodeName];
@@ -232,7 +239,7 @@ function setupN8nInstrumentation() {
                 if (llmData.system !== 'unknown') {
                   llmNodeCount++;
                   
-                  // Create a child span for the LLM operation
+                  // Create LLM span
                   const llmSpan = tracer.startSpan('n8n.llm.generation', {
                     attributes: {
                       'n8n.node.name': nodeName,
@@ -247,8 +254,6 @@ function setupN8nInstrumentation() {
                   
                   llmSpan.setStatus({ code: SpanStatusCode.OK });
                   llmSpan.end();
-                  
-                  console.log(`🤖 Processed LLM node: ${nodeName} (${llmData.system})`);
                 } else {
                   // Create regular node span
                   const nodeSpan = tracer.startSpan('n8n.node.execute', {
@@ -268,7 +273,7 @@ function setupN8nInstrumentation() {
 
             span.setAttributes({
               'langfuse.status': 'success',
-              'n8n.workflow.nodes_executed': Object.keys(runData).length,
+              'n8n.workflow.nodes_executed': result?.data?.resultData?.runData ? Object.keys(result.data.resultData.runData).length : 0,
               'n8n.workflow.llm_nodes': llmNodeCount
             });
 
