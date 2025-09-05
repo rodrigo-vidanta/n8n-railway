@@ -49,7 +49,7 @@ RUN cp -r node_modules/* /usr/local/lib/node_modules/
 # Switch to n8n's installation directory for our instrumentation files
 WORKDIR /usr/local/lib/node_modules/n8n
 
-# Create instrumentation files
+# Create instrumentation files with proper syntax
 RUN cat > tracing-langfuse.js <<'EOF'
 "use strict";
 
@@ -108,9 +108,9 @@ registerInstrumentations({
 // Setup n8n specific instrumentation (manual patching)
 setupN8nOpenTelemetry();
 
-// Configure Langfuse headers
+// Configure Langfuse headers (using string concatenation instead of template literals)
 const langfuseHeaders = {
-  'Authorization': \`Bearer \${process.env.LANGFUSE_SECRET_KEY}\`,
+  'Authorization': 'Bearer ' + process.env.LANGFUSE_SECRET_KEY,
   'x-langfuse-public-key': process.env.LANGFUSE_PUBLIC_KEY
 };
 
@@ -171,7 +171,7 @@ function setupN8nOpenTelemetry() {
       const workflowId = wfData?.id ?? "unknown"
       const workflowName = wfData?.name ?? "unknown"
 
-      console.log(\`📊 Starting workflow: \${workflowName} (\${workflowId})\`);
+      console.log("📊 Starting workflow: " + workflowName + " (" + workflowId + ")");
 
       const workflowAttributes = {
         'langfuse.type': 'workflow',
@@ -181,7 +181,7 @@ function setupN8nOpenTelemetry() {
         'n8n.service': 'workflow-engine',
         ...flat(wfData?.settings ?? {}, { 
           delimiter: '.', 
-          transformKey: (key) => \`n8n.workflow.settings.\${key}\` 
+          transformKey: (key) => 'n8n.workflow.settings.' + key
         }),
       };
 
@@ -275,7 +275,7 @@ function setupN8nOpenTelemetry() {
         nodeName.toLowerCase().includes('llama') ||
         nodeName.toLowerCase().includes('langfuse');
 
-      console.log(\`🔍 Processing node: \${nodeName} (\${nodeType}) - LLM: \${isLLMNode}\`);
+      console.log("🔍 Processing node: " + nodeName + " (" + nodeType + ") - LLM: " + isLLMNode);
 
       const nodeAttributes = {
         'langfuse.type': isLLMNode ? 'generation' : 'span',
@@ -299,14 +299,14 @@ function setupN8nOpenTelemetry() {
         if (nodeParams.maxTokens !== undefined) {
           nodeAttributes['langfuse.model.max_tokens'] = nodeParams.maxTokens;
         }
-        console.log(\`🤖 LLM node detected: \${nodeName} with model: \${nodeParams.model || 'unknown'}\`);
+        console.log("🤖 LLM node detected: " + nodeName + " with model: " + (nodeParams.model || 'unknown'));
       }
 
       // Flatten node configuration
       const flattenedNode = flat(node ?? {}, { delimiter: '.' });
       for (const [key, value] of Object.entries(flattenedNode)) {
         if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
-          nodeAttributes[\`n8n.node.\${key}\`] = value;
+          nodeAttributes['n8n.node.' + key] = value;
         }
       }
       
@@ -326,7 +326,7 @@ function setupN8nOpenTelemetry() {
             const endTime = Date.now();
             const latency = endTime - startTime;
             
-            console.log(\`⚡ Node executed in \${latency}ms\`);
+            console.log("⚡ Node executed in " + latency + "ms");
             
             // Capture results with enhanced LLM handling
             try {
@@ -371,7 +371,7 @@ function setupN8nOpenTelemetry() {
                     nodeSpan.setAttribute('langfuse.generation.output', 
                       responseStr.length > 5000 ? responseStr.substring(0, 5000) + '...[truncated]' : responseStr
                     );
-                    console.log(\`📝 Response captured (\${responseStr.length} chars)\`);
+                    console.log("📝 Response captured (" + responseStr.length + " chars)");
                   }
 
                   // Input capture for LLM nodes
@@ -409,7 +409,7 @@ function setupN8nOpenTelemetry() {
             const endTime = Date.now();
             const latency = endTime - startTime;
             
-            console.error(\`❌ Node failed after \${latency}ms:\`, error.message);
+            console.error("❌ Node failed after " + latency + "ms:", error.message);
             
             nodeSpan.recordException(error);
             nodeSpan.setStatus({
