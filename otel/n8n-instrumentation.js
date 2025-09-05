@@ -244,13 +244,31 @@ function setupN8nInstrumentation() {
             let llmNodeCount = 0;
             
             // Process nodes and create child spans
+            if (process.env.OTEL_LOG_LEVEL === 'debug') {
+              console.log(`Processing ${nodes.length} nodes from workflow`);
+              console.log(`RunData keys:`, Object.keys(runData));
+            }
+            
             if (nodes.length > 0) {
               nodes.forEach((nodeData, index) => {
               const nodeName = nodeData.name;
               const nodeRunData = runData[nodeName];
               
+              if (process.env.OTEL_LOG_LEVEL === 'debug') {
+                console.log(`Node ${index}: ${nodeName} (${nodeData.type}) - hasRunData: ${!!nodeRunData}`);
+              }
+              
               if (nodeRunData) {
                 const llmData = extractLLMData(nodeData, nodeRunData);
+                
+                if (process.env.OTEL_LOG_LEVEL === 'debug') {
+                  console.log(`LLM Data for ${nodeName}:`, { 
+                    system: llmData.system, 
+                    model: llmData.model,
+                    hasInput: !!llmData.input,
+                    hasOutput: !!llmData.output 
+                  });
+                }
                 
                 if (llmData.system !== 'unknown') {
                   llmNodeCount++;
