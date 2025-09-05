@@ -14,24 +14,40 @@ RUN echo "Installing required packages..." && \
     tini && \
     echo "Packages installed successfully"
 
-# Switch to n8n's installation directory
-WORKDIR /usr/local/lib/node_modules/n8n
+# Create a separate directory for our OpenTelemetry packages
+WORKDIR /opt/otel
 
-# Install Node.js OpenTelemetry dependencies locally to n8n
-RUN npm install \
-    @opentelemetry/api \
-    @opentelemetry/sdk-node \
-    @opentelemetry/auto-instrumentations-node \
-    @opentelemetry/exporter-trace-otlp-http \
-    @opentelemetry/exporter-logs-otlp-http \
-    @opentelemetry/resources \
-    @opentelemetry/semantic-conventions \
-    @opentelemetry/instrumentation \
-    @opentelemetry/instrumentation-winston \
-    @opentelemetry/winston-transport \
-    @opentelemetry/context-async-hooks \
-    winston \
-    flat
+# Create package.json for our OpenTelemetry dependencies
+RUN cat > package.json <<'EOF'
+{
+  "name": "n8n-otel-deps",
+  "version": "1.0.0",
+  "dependencies": {
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/sdk-node": "^0.52.1",
+    "@opentelemetry/auto-instrumentations-node": "^0.49.1",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.52.1",
+    "@opentelemetry/exporter-logs-otlp-http": "^0.52.1",
+    "@opentelemetry/resources": "^1.25.1",
+    "@opentelemetry/semantic-conventions": "^1.25.1",
+    "@opentelemetry/instrumentation": "^0.52.1",
+    "@opentelemetry/instrumentation-winston": "^0.39.0",
+    "@opentelemetry/winston-transport": "^0.4.0",
+    "@opentelemetry/context-async-hooks": "^1.25.1",
+    "winston": "^3.13.1",
+    "flat": "^6.0.1"
+  }
+}
+EOF
+
+# Install OpenTelemetry dependencies in our separate directory
+RUN npm install --production
+
+# Copy node_modules to global location for access
+RUN cp -r node_modules/* /usr/local/lib/node_modules/
+
+# Switch to n8n's installation directory for our instrumentation files
+WORKDIR /usr/local/lib/node_modules/n8n
 
 # Create instrumentation files
 RUN cat > tracing-langfuse.js <<'EOF'
@@ -94,7 +110,7 @@ setupN8nOpenTelemetry();
 
 // Configure Langfuse headers
 const langfuseHeaders = {
-  'Authorization': `Bearer ${process.env.LANGFUSE_SECRET_KEY}`,
+  'Authorization': \`Bearer \${process.env.LANGFUSE_SECRET_KEY}\`,
   'x-langfuse-public-key': process.env.LANGFUSE_PUBLIC_KEY
 };
 
@@ -155,7 +171,7 @@ function setupN8nOpenTelemetry() {
       const workflowId = wfData?.id ?? "unknown"
       const workflowName = wfData?.name ?? "unknown"
 
-      console.log(`📊 Starting workflow: ${workflowName} (${workflowId})`);
+      console.log(\`📊 Starting workflow: \${workflowName} (\${workflowId})\`);
 
       const workflowAttributes = {
         'langfuse.type': 'workflow',
@@ -165,7 +181,7 @@ function setupN8nOpenTelemetry() {
         'n8n.service': 'workflow-engine',
         ...flat(wfData?.settings ?? {}, { 
           delimiter: '.', 
-          transformKey: (key) => `n8n.workflow.settings.${key}` 
+          transformKey: (key) => \`n8n.workflow.settings.\${key}\` 
         }),
       };
 
@@ -259,7 +275,7 @@ function setupN8nOpenTelemetry() {
         nodeName.toLowerCase().includes('llama') ||
         nodeName.toLowerCase().includes('langfuse');
 
-      console.log(`🔍 Processing node: ${nodeName} (${nodeType}) - LLM: ${isLLMNode}`);
+      console.log(\`🔍 Processing node: \${nodeName} (\${nodeType}) - LLM: \${isLLMNode}\`);
 
       const nodeAttributes = {
         'langfuse.type': isLLMNode ? 'generation' : 'span',
@@ -283,14 +299,14 @@ function setupN8nOpenTelemetry() {
         if (nodeParams.maxTokens !== undefined) {
           nodeAttributes['langfuse.model.max_tokens'] = nodeParams.maxTokens;
         }
-        console.log(`🤖 LLM node detected: ${nodeName} with model: ${nodeParams.model || 'unknown'}`);
+        console.log(\`🤖 LLM node detected: \${nodeName} with model: \${nodeParams.model || 'unknown'}\`);
       }
 
       // Flatten node configuration
       const flattenedNode = flat(node ?? {}, { delimiter: '.' });
       for (const [key, value] of Object.entries(flattenedNode)) {
         if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
-          nodeAttributes[`n8n.node.${key}`] = value;
+          nodeAttributes[\`n8n.node.\${key}\`] = value;
         }
       }
       
@@ -310,7 +326,7 @@ function setupN8nOpenTelemetry() {
             const endTime = Date.now();
             const latency = endTime - startTime;
             
-            console.log(`⚡ Node executed in ${latency}ms`);
+            console.log(\`⚡ Node executed in \${latency}ms\`);
             
             // Capture results with enhanced LLM handling
             try {
@@ -355,7 +371,7 @@ function setupN8nOpenTelemetry() {
                     nodeSpan.setAttribute('langfuse.generation.output', 
                       responseStr.length > 5000 ? responseStr.substring(0, 5000) + '...[truncated]' : responseStr
                     );
-                    console.log(`📝 Response captured (${responseStr.length} chars)`);
+                    console.log(\`📝 Response captured (\${responseStr.length} chars)\`);
                   }
 
                   // Input capture for LLM nodes
@@ -393,7 +409,7 @@ function setupN8nOpenTelemetry() {
             const endTime = Date.now();
             const latency = endTime - startTime;
             
-            console.error(`❌ Node failed after ${latency}ms:`, error.message);
+            console.error(\`❌ Node failed after \${latency}ms:\`, error.message);
             
             nodeSpan.recordException(error);
             nodeSpan.setStatus({
