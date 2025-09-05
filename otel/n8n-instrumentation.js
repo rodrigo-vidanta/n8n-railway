@@ -26,11 +26,11 @@ function setupN8nInstrumentation() {
       if (model.includes('vertex')) return 'vertex';
       if (model.includes('huggingface')) return 'huggingface';
       
-      // Check in node type and name
-      if (type.includes('anthropic') || name.includes('anthropic') || name.includes('claude')) return 'anthropic';
-      if (type.includes('openai') || name.includes('openai') || name.includes('gpt')) return 'openai';
-      if (type.includes('azure') || name.includes('azure')) return 'azure_openai';
-      if (type.includes('vertex') || type.includes('google') || name.includes('vertex') || name.includes('google')) return 'vertex';
+      // Check in node type and name - enhanced for LangChain types
+      if (type.includes('lmchatanthropic') || type.includes('anthropic') || name.includes('anthropic') || name.includes('claude')) return 'anthropic';
+      if (type.includes('lmchatazureopenai') || type.includes('azure') || name.includes('azure openai')) return 'azure_openai';
+      if (type.includes('lmchatopenai') || type.includes('openai') || name.includes('openai') || name.includes('gpt')) return 'openai';
+      if (type.includes('lmchatgooglevertex') || type.includes('vertex') || type.includes('google') || name.includes('vertex') || name.includes('google')) return 'vertex';
       if (type.includes('groq') || name.includes('groq')) return 'groq';
       
       // If we detected it as AI but can't determine system, return 'other'
@@ -46,10 +46,20 @@ function setupN8nInstrumentation() {
         const nodeName = nodeData?.name || '';
         const parameters = nodeData?.parameters || {};
 
-        // Detect AI nodes by type or name
-        const aiIndicators = ['openai', 'anthropic', 'langchain', 'claude', 'gpt', 'azure', 'vertex', 'groq', 'llm', 'ai', 'chat', 'completion'];
-        const isAINode = aiIndicators.some(indicator => 
-          nodeType.toLowerCase().includes(indicator) || 
+        // Detect AI nodes by type or name - enhanced for LangChain nodes
+        const aiTypeIndicators = [
+          'langchain.lm', 'langchain.chat', 'lmChat', 'chatModel',
+          'openai', 'anthropic', 'claude', 'gpt', 'azure', 'vertex', 'groq', 
+          'llm', 'ai', 'chat', 'completion'
+        ];
+        const aiNameIndicators = [
+          'chat model', 'openai', 'anthropic', 'claude', 'azure', 'vertex', 
+          'groq', 'llm', 'ai', 'gpt'
+        ];
+        
+        const isAINode = aiTypeIndicators.some(indicator => 
+          nodeType.toLowerCase().includes(indicator)
+        ) || aiNameIndicators.some(indicator => 
           nodeName.toLowerCase().includes(indicator)
         );
 
@@ -76,25 +86,54 @@ function setupN8nInstrumentation() {
             llmData.input = parameters.text;
           }
 
-          // Extract output from run data
+          // Extract input and output from run data
           if (runData && runData.length > 0) {
+            // Extract input from first run
+            const firstRun = runData[0];
+            if (firstRun?.data?.main && firstRun.data.main.length > 0) {
+              const inputData = firstRun.data.main[0];
+              if (inputData && inputData.length > 0) {
+                const input = inputData[0]?.json || inputData[0];
+                // Look for common input fields
+                if (input) {
+                  llmData.input = input.chatInput || input.prompt || input.message || input.text || JSON.stringify(input).substring(0, 1000);
+                }
+              }
+            }
+
+            // Extract output from last run
             const lastRun = runData[runData.length - 1];
             if (lastRun?.data?.main && lastRun.data.main.length > 0) {
               const outputData = lastRun.data.main[0];
               if (outputData && outputData.length > 0) {
                 const output = outputData[0]?.json || outputData[0];
-                llmData.output = JSON.stringify(output);
-
-                // Try to extract token usage from output
-                try {
-                  if (output.usage) {
-                    llmData.tokens = {
-                      input: output.usage.prompt_tokens || output.usage.input_tokens || 0,
-                      output: output.usage.completion_tokens || output.usage.output_tokens || 0
-                    };
+                if (output) {
+                  // Look for common output fields
+                  llmData.output = output.response || output.content || output.text || JSON.stringify(output).substring(0, 1000);
+                  
+                  // Extract model from output metadata
+                  if (output.model) {
+                    llmData.model = output.model;
+                  } else if (output.response_metadata?.model) {
+                    llmData.model = output.response_metadata.model;
                   }
-                } catch (e) {
-                  // Ignore token extraction errors
+
+                  // Try to extract token usage from output
+                  try {
+                    if (output.usage) {
+                      llmData.tokens = {
+                        input: output.usage.prompt_tokens || output.usage.input_tokens || 0,
+                        output: output.usage.completion_tokens || output.usage.output_tokens || 0
+                      };
+                    } else if (output.response_metadata?.tokenUsage) {
+                      llmData.tokens = {
+                        input: output.response_metadata.tokenUsage.promptTokens || 0,
+                        output: output.response_metadata.tokenUsage.completionTokens || 0
+                      };
+                    }
+                  } catch (e) {
+                    // Ignore token extraction errors
+                  }
                 }
               }
             }
@@ -274,6 +313,15 @@ function setupN8nInstrumentation() {
                     hasInput: !!llmData.input,
                     hasOutput: !!llmData.output 
                   });
+                  
+                  // Debug: Log runData structure for LLM nodes
+                  if (llmData.system !== 'unknown') {
+                    console.log(`RunData structure for ${nodeName}:`, JSON.stringify({
+                      runDataLength: nodeRunData.length,
+                      firstRun: nodeRunData[0]?.data?.main ? 'has main data' : 'no main data',
+                      lastRun: nodeRunData[nodeRunData.length - 1]?.data?.main ? 'has main data' : 'no main data'
+                    }));
+                  }
                 }
                 
                 if (llmData.system !== 'unknown') {
