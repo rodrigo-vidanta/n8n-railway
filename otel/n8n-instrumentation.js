@@ -89,7 +89,7 @@ function setupN8nInstrumentation() {
     }
 
     // Helper function to set GenAI span attributes
-    function setGenAIAttributes(span, llmData) {
+    function setGenAIAttributes(span, llmData, nodeData) {
       if (llmData.system !== 'unknown') {
         span.setAttributes({
           'gen_ai.system': llmData.system,
@@ -101,6 +101,33 @@ function setupN8nInstrumentation() {
           span.setAttributes({
             'gen_ai.request.model': llmData.model,
             'gen_ai.response.model': llmData.model
+          });
+        }
+
+        // Server attributes based on system
+        if (llmData.system === 'openai') {
+          span.setAttributes({
+            'server.address': 'api.openai.com',
+            'server.port': 443
+          });
+        } else if (llmData.system === 'azure_openai') {
+          span.setAttributes({
+            'server.port': 443
+          });
+        } else if (llmData.system === 'anthropic') {
+          span.setAttributes({
+            'server.address': 'api.anthropic.com',
+            'server.port': 443
+          });
+        } else if (llmData.system === 'vertex') {
+          span.setAttributes({
+            'server.address': 'generativelanguage.googleapis.com',
+            'server.port': 443
+          });
+        } else if (llmData.system === 'groq') {
+          span.setAttributes({
+            'server.address': 'api.groq.com',
+            'server.port': 443
           });
         }
 
@@ -120,12 +147,44 @@ function setupN8nInstrumentation() {
           });
         }
 
-        // Token usage if available
-        if (llmData.tokens) {
+        // Updated token usage attributes (2024-2025 standard)
+        if (llmData.tokens && (llmData.tokens.input > 0 || llmData.tokens.output > 0)) {
           span.setAttributes({
-            'gen_ai.usage.prompt_tokens': llmData.tokens.input || 0,
-            'gen_ai.usage.completion_tokens': llmData.tokens.output || 0,
+            'gen_ai.usage.input_tokens': llmData.tokens.input || 0,
+            'gen_ai.usage.output_tokens': llmData.tokens.output || 0,
             'gen_ai.usage.total_tokens': (llmData.tokens.input || 0) + (llmData.tokens.output || 0)
+          });
+        }
+
+        // Model parameters if available
+        const parameters = nodeData?.parameters || {};
+        if (parameters.temperature !== undefined) {
+          span.setAttributes({
+            'gen_ai.request.temperature': parameters.temperature
+          });
+        }
+        if (parameters.max_tokens !== undefined || parameters.maxTokens !== undefined) {
+          span.setAttributes({
+            'gen_ai.request.max_tokens': parameters.max_tokens || parameters.maxTokens
+          });
+        }
+        if (parameters.top_p !== undefined) {
+          span.setAttributes({
+            'gen_ai.request.top_p': parameters.top_p
+          });
+        }
+
+        // Cost information if available
+        if (llmData.cost) {
+          span.setAttributes({
+            'gen_ai.usage.cost': llmData.cost
+          });
+        }
+
+        // Streaming detection
+        if (parameters.stream) {
+          span.setAttributes({
+            'gen_ai.request.is_stream': parameters.stream
           });
         }
       }
@@ -184,7 +243,7 @@ function setupN8nInstrumentation() {
                   }, activeContext);
                   
                   // Set GenAI attributes
-                  setGenAIAttributes(llmSpan, llmData);
+                  setGenAIAttributes(llmSpan, llmData, nodeData);
                   
                   llmSpan.setStatus({ code: SpanStatusCode.OK });
                   llmSpan.end();
