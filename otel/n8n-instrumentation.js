@@ -243,16 +243,22 @@ function setupN8nInstrumentation() {
             const nodes = Array.isArray(wfData?.nodes) ? wfData.nodes : [];
             let llmNodeCount = 0;
             
-            // Process nodes and create child spans
+            // Process nodes and create child spans - use runData as primary source
             if (process.env.OTEL_LOG_LEVEL === 'debug') {
-              console.log(`Processing ${nodes.length} nodes from workflow`);
-              console.log(`RunData keys:`, Object.keys(runData));
+              console.log(`Processing ${nodes.length} nodes from wfData.nodes`);
+              console.log(`RunData has ${Object.keys(runData).length} executed nodes:`, Object.keys(runData));
             }
             
-            if (nodes.length > 0) {
-              nodes.forEach((nodeData, index) => {
-              const nodeName = nodeData.name;
+            // Process from runData (executed nodes) instead of wfData.nodes
+            Object.keys(runData).forEach((nodeName, index) => {
               const nodeRunData = runData[nodeName];
+              
+              // Try to find node definition in wfData.nodes, fallback to name-based detection
+              let nodeData = nodes.find(n => n.name === nodeName) || { 
+                name: nodeName, 
+                type: 'unknown', 
+                parameters: {} 
+              };
               
               if (process.env.OTEL_LOG_LEVEL === 'debug') {
                 console.log(`Node ${index}: ${nodeName} (${nodeData.type}) - hasRunData: ${!!nodeRunData}`);
@@ -304,7 +310,6 @@ function setupN8nInstrumentation() {
                 }
               }
             });
-            }
 
             span.setAttributes({
               'langfuse.status': 'success',
