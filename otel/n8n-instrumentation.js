@@ -86,54 +86,60 @@ function setupN8nInstrumentation() {
             llmData.input = parameters.text;
           }
 
-          // Extract input and output from run data
+          // Extract input and output from run data - CORRECTED for n8n structure
           if (runData && runData.length > 0) {
-            // Extract input from first run
-            const firstRun = runData[0];
-            if (firstRun?.data?.main && firstRun.data.main.length > 0) {
-              const inputData = firstRun.data.main[0];
-              if (inputData && inputData.length > 0) {
-                const input = inputData[0]?.json || inputData[0];
-                // Look for common input fields
-                if (input) {
-                  llmData.input = input.chatInput || input.prompt || input.message || input.text || JSON.stringify(input).substring(0, 1000);
-                }
-              }
-            }
-
-            // Extract output from last run
             const lastRun = runData[runData.length - 1];
-            if (lastRun?.data?.main && lastRun.data.main.length > 0) {
-              const outputData = lastRun.data.main[0];
-              if (outputData && outputData.length > 0) {
-                const output = outputData[0]?.json || outputData[0];
+            
+            // n8n LangChain nodes use ai_languageModel output
+            if (lastRun?.data?.ai_languageModel && lastRun.data.ai_languageModel.length > 0) {
+              const aiData = lastRun.data.ai_languageModel[0];
+              if (aiData && aiData.length > 0) {
+                const output = aiData[0]?.json;
                 if (output) {
-                  // Look for common output fields
-                  llmData.output = output.response || output.content || output.text || JSON.stringify(output).substring(0, 1000);
+                  // Extract output text
+                  if (output.response?.generations?.[0]?.[0]?.text) {
+                    llmData.output = output.response.generations[0][0].text;
+                  } else if (output.content) {
+                    llmData.output = output.content;
+                  } else if (output.text) {
+                    llmData.output = output.text;
+                  }
                   
-                  // Extract model from output metadata
-                  if (output.model) {
-                    llmData.model = output.model;
-                  } else if (output.response_metadata?.model) {
-                    llmData.model = output.response_metadata.model;
+                  // Extract model from response metadata
+                  if (output.response?.model) {
+                    llmData.model = output.response.model;
+                  } else if (output.response?.response_metadata?.model) {
+                    llmData.model = output.response.response_metadata.model;
                   }
 
-                  // Try to extract token usage from output
+                  // Extract token usage
                   try {
-                    if (output.usage) {
+                    if (output.response?.response_metadata?.tokenUsage) {
+                      const usage = output.response.response_metadata.tokenUsage;
+                      llmData.tokens = {
+                        input: usage.promptTokens || usage.input_tokens || 0,
+                        output: usage.completionTokens || usage.output_tokens || 0
+                      };
+                    } else if (output.usage) {
                       llmData.tokens = {
                         input: output.usage.prompt_tokens || output.usage.input_tokens || 0,
                         output: output.usage.completion_tokens || output.usage.output_tokens || 0
-                      };
-                    } else if (output.response_metadata?.tokenUsage) {
-                      llmData.tokens = {
-                        input: output.response_metadata.tokenUsage.promptTokens || 0,
-                        output: output.response_metadata.tokenUsage.completionTokens || 0
                       };
                     }
                   } catch (e) {
                     // Ignore token extraction errors
                   }
+                }
+              }
+            }
+            
+            // Also try standard main output for non-LangChain nodes
+            if (!llmData.output && lastRun?.data?.main && lastRun.data.main.length > 0) {
+              const mainData = lastRun.data.main[0];
+              if (mainData && mainData.length > 0) {
+                const output = mainData[0]?.json || mainData[0];
+                if (output) {
+                  llmData.output = output.response || output.content || output.text || JSON.stringify(output).substring(0, 1000);
                 }
               }
             }
