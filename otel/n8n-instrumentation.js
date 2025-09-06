@@ -8,7 +8,7 @@ function setupN8nInstrumentation() {
 
     console.log("🔧 Setting up n8n instrumentation for Langfuse...");
 
-    // Helper function to detect AI system from model name
+    // Helper function to detect AI system from model name, node type, and name
     function detectAISystem(modelName, nodeType, nodeName) {
       const model = (modelName || '').toLowerCase();
       const type = (nodeType || '').toLowerCase();
@@ -17,14 +17,12 @@ function setupN8nInstrumentation() {
       // Check in model name first
       if (model.includes('gpt') || model.includes('openai')) return 'openai';
       if (model.includes('claude') || model.includes('anthropic')) return 'anthropic';
-      if (model.includes('gemini') || model.includes('google')) return 'google';
+      if (model.includes('gemini') || model.includes('google')) return 'vertex';
       if (model.includes('llama') || model.includes('meta')) return 'meta';
       if (model.includes('azure')) return 'azure_openai';
       if (model.includes('cohere')) return 'cohere';
       if (model.includes('mistral')) return 'mistral';
       if (model.includes('groq')) return 'groq';
-      if (model.includes('vertex')) return 'vertex';
-      if (model.includes('huggingface')) return 'huggingface';
       
       // Check in node type and name - enhanced for LangChain types
       if (type.includes('lmchatanthropic') || type.includes('anthropic') || name.includes('anthropic') || name.includes('claude')) return 'anthropic';
@@ -32,28 +30,39 @@ function setupN8nInstrumentation() {
       if (type.includes('lmchatopenai') || type.includes('openai') || name.includes('openai') || name.includes('gpt')) return 'openai';
       if (type.includes('lmchatgooglevertex') || type.includes('vertex') || type.includes('google') || name.includes('vertex') || name.includes('google')) return 'vertex';
       if (type.includes('groq') || name.includes('groq')) return 'groq';
+      if (type.includes('langchain') || name.includes('corrector') || name.includes('transcripciones')) return 'openai'; // Default for chains
       
-      // If we detected it as AI but can't determine system, return 'other'
-      return (!modelName || modelName === 'unknown') ? 'unknown' : 'other';
+      return 'unknown';
     }
 
-    // Helper function to extract LLM data from node execution
+    // Function to extract LLM data from node data and run data
     function extractLLMData(nodeData, runData) {
-      const llmData = { model: null, input: null, output: null, system: 'unknown', tokens: null };
-
+      const llmData = { 
+        system: 'unknown', 
+        model: null, 
+        input: null, 
+        output: null, 
+        tokens: null, 
+        cost: null, 
+        toolCalls: null, 
+        functionCall: null 
+      };
+      
       try {
         const nodeType = nodeData?.type || '';
         const nodeName = nodeData?.name || '';
         const parameters = nodeData?.parameters || {};
 
-        // Detect AI nodes by type or name - enhanced for LangChain nodes
+        // Detect AI nodes by type or name - enhanced for ALL LangChain nodes
         const aiTypeIndicators = [
-          'langchain.lm', 'langchain.chat', 'lmChat', 'chatModel',
+          'langchain.lm', 'langchain.chat', 'langchain.chain', // ← AGREGADO chainLlm
+          'lmChat', 'chatModel', 'chainLlm',
           'openai', 'anthropic', 'claude', 'gpt', 'azure', 'vertex', 'groq', 
           'llm', 'ai', 'chat', 'completion'
         ];
         const aiNameIndicators = [
-          'chat model', 'openai', 'anthropic', 'claude', 'azure', 'vertex', 
+          'chat model', 'corrector', 'transcripciones', // ← AGREGADO para tu caso
+          'openai', 'anthropic', 'claude', 'azure', 'vertex', 
           'groq', 'llm', 'ai', 'gpt'
         ];
         
@@ -63,17 +72,18 @@ function setupN8nInstrumentation() {
           nodeName.toLowerCase().includes(indicator)
         );
 
-        // Debug: Log node detection
-        if (process.env.OTEL_LOG_LEVEL === 'debug') {
-          console.log(`Checking node: ${nodeName} (${nodeType}) - isAI: ${isAINode}`);
-        }
+        // Debug: Log node detection - COMPLETO sin truncar
+        console.log(`=== NODE DETECTION DEBUG ===`);
+        console.log(`Node: ${nodeName}`);
+        console.log(`Type: ${nodeType}`);
+        console.log(`Is AI: ${isAINode}`);
 
         if (isAINode) {
           // Extract model information
           llmData.model = parameters?.model || parameters?.options?.model || parameters?.modelName || 'unknown';
           llmData.system = detectAISystem(llmData.model, nodeType, nodeName);
 
-          // Extract input (prompts, messages)
+          // Extract input from parameters
           if (parameters?.prompt) {
             llmData.input = parameters.prompt;
           } else if (parameters?.message) {
@@ -172,9 +182,7 @@ function setupN8nInstrumentation() {
                     }
                     
                   } catch (e) {
-                    if (process.env.OTEL_LOG_LEVEL === 'debug') {
-                      console.log(`Error extracting tokens for ${nodeName}:`, e.message);
-                    }
+                    console.log(`Error extracting tokens for ${nodeName}:`, e.message);
                   }
                   
                   // Extract tool usage if available
@@ -188,86 +196,122 @@ function setupN8nInstrumentation() {
                   } catch (e) {
                     // Ignore tool extraction errors
                   }
+                  
+                  // DEBUG: Log COMPLETE structure without truncation
+                  console.log(`=== COMPLETE AI_LANGUAGEMODEL DATA ===`);
+                  console.log(`Node: ${nodeName}`);
+                  console.log(`Full output structure:`, JSON.stringify(output, null, 2));
+                  console.log(`=== END COMPLETE DATA ===`);
                 }
               }
             }
             
             // Also try standard main output for non-LangChain nodes
-            if (!llmData.output && lastRun?.data?.main && lastRun.data.main.length > 0) {
-              const mainData = lastRun.data.main[0];
-              if (mainData && mainData.length > 0) {
-                const output = mainData[0]?.json || mainData[0];
-                if (output) {
-                  llmData.output = output.response || output.content || output.text || JSON.stringify(output).substring(0, 1000);
+            else if (lastRun?.data?.main && lastRun.data.main.length > 0) {
+              const outputData = lastRun.data.main[0];
+              if (outputData && outputData.length > 0) {
+                const output = outputData[0]?.json || outputData[0];
+                llmData.output = JSON.stringify(output);
+                
+                // Standard token extraction
+                if (output.usage) {
+                  llmData.tokens = {
+                    input: output.usage.prompt_tokens || output.usage.input_tokens || 0,
+                    output: output.usage.completion_tokens || output.usage.output_tokens || 0
+                  };
+                }
+                
+                if (output.model || output.response_metadata?.model) {
+                  llmData.model = output.model || output.response_metadata.model;
                 }
               }
             }
           }
-        }
-      } catch (error) {
-        console.error("Error extracting LLM data:", error);
-      }
 
-      return llmData;
+          // DEBUG: Log COMPLETE extraction results
+          console.log(`=== EXTRACTION RESULTS ===`);
+          console.log(`Node: ${nodeName}`);
+          console.log(`System: ${llmData.system}`);
+          console.log(`Model: ${llmData.model}`);
+          console.log(`Has Input: ${!!llmData.input}`);
+          console.log(`Has Output: ${!!llmData.output}`);
+          console.log(`Input (first 500 chars): ${llmData.input ? llmData.input.substring(0, 500) : 'null'}`);
+          console.log(`Output (first 500 chars): ${llmData.output ? llmData.output.substring(0, 500) : 'null'}`);
+          console.log(`Tokens: ${JSON.stringify(llmData.tokens)}`);
+          console.log(`Cost: ${llmData.cost}`);
+          console.log(`=== END EXTRACTION RESULTS ===`);
+        }
+
+        return llmData;
+      } catch (error) {
+        console.error(`Error extracting LLM data for ${nodeData?.name}:`, error);
+        return llmData;
+      }
     }
 
-    // Helper function to set GenAI attributes on span
+    // Helper function to set GenAI span attributes with ALL data
     function setGenAIAttributes(span, llmData, nodeData) {
       try {
-        // Basic GenAI attributes
-        if (llmData.system && llmData.system !== 'unknown') {
-          span.setAttributes({
-            'gen_ai.system': llmData.system,
-            'gen_ai.request.model': llmData.model || 'unknown'
-          });
+        // Core GenAI attributes
+        span.setAttributes({
+          'gen_ai.system': llmData.system,
+          'gen_ai.operation.name': 'chat'
+        });
 
-          // Server attributes based on system
-          switch (llmData.system) {
-            case 'openai':
-              span.setAttributes({
-                'server.address': 'api.openai.com',
-                'server.port': 443
-              });
-              break;
-            case 'azure_openai':
-              span.setAttributes({
-                'server.address': 'cognitiveservices.azure.com',
-                'server.port': 443
-              });
-              break;
-            case 'anthropic':
-              span.setAttributes({
-                'server.address': 'api.anthropic.com',
-                'server.port': 443
-              });
-              break;
-            case 'vertex':
-              span.setAttributes({
-                'server.address': 'googleapis.com',
-                'server.port': 443
-              });
-              break;
-            case 'groq':
-              span.setAttributes({
-                'server.address': 'api.groq.com',
-                'server.port': 443
-              });
-              break;
-          }
+        // Model information
+        if (llmData.model && llmData.model !== 'unknown') {
+          span.setAttributes({
+            'gen_ai.request.model': llmData.model,
+            'gen_ai.response.model': llmData.model
+          });
         }
 
-        // Input/Output with Langfuse specific attributes
+        // Server attributes based on system
+        switch (llmData.system) {
+          case 'openai':
+            span.setAttributes({
+              'server.address': 'api.openai.com',
+              'server.port': 443
+            });
+            break;
+          case 'azure_openai':
+            span.setAttributes({
+              'server.address': 'cognitiveservices.azure.com',
+              'server.port': 443
+            });
+            break;
+          case 'anthropic':
+            span.setAttributes({
+              'server.address': 'api.anthropic.com',
+              'server.port': 443
+            });
+            break;
+          case 'vertex':
+            span.setAttributes({
+              'server.address': 'aiplatform.googleapis.com',
+              'server.port': 443
+            });
+            break;
+          case 'groq':
+            span.setAttributes({
+              'server.address': 'api.groq.com',
+              'server.port': 443
+            });
+            break;
+        }
+
+        // Input/Output with Langfuse specific attributes - NO TRUNCAR
         if (llmData.input) {
           span.setAttributes({
-            'gen_ai.prompt': llmData.input.substring(0, 1000), // OpenTelemetry standard
-            'langfuse.generation.input': llmData.input.substring(0, 2000) // Langfuse specific
+            'gen_ai.prompt': llmData.input, // NO truncar para debug
+            'langfuse.generation.input': llmData.input // Langfuse specific completo
           });
         }
 
         if (llmData.output) {
           span.setAttributes({
-            'gen_ai.completion': llmData.output.substring(0, 1000), // OpenTelemetry standard
-            'langfuse.generation.output': llmData.output.substring(0, 2000) // Langfuse specific
+            'gen_ai.completion': llmData.output, // NO truncar para debug
+            'langfuse.generation.output': llmData.output // Langfuse specific completo
           });
         }
 
@@ -299,14 +343,14 @@ function setupN8nInstrumentation() {
         // Tool usage information
         if (llmData.toolCalls && llmData.toolCalls.length > 0) {
           span.setAttributes({
-            'gen_ai.tool.calls': JSON.stringify(llmData.toolCalls).substring(0, 1000),
+            'gen_ai.tool.calls': JSON.stringify(llmData.toolCalls), // NO truncar
             'langfuse.generation.tools.used': llmData.toolCalls.length
           });
         }
         
         if (llmData.functionCall) {
           span.setAttributes({
-            'gen_ai.function.call': JSON.stringify(llmData.functionCall).substring(0, 1000)
+            'gen_ai.function.call': JSON.stringify(llmData.functionCall) // NO truncar
           });
         }
 
@@ -388,28 +432,18 @@ function setupN8nInstrumentation() {
     const originalProcessRun = WorkflowExecute.prototype.processRunExecutionData;
     WorkflowExecute.prototype.processRunExecutionData = function (workflow) {
       const wfData = workflow || {};
-      const workflowId = wfData?.id ?? "unknown";
       const workflowName = wfData?.name ?? "unknown";
+      const workflowId = wfData?.id ?? "unknown";
 
-      // Reduced logging - only log workflow starts in debug mode
-      if (process.env.OTEL_LOG_LEVEL === 'debug') {
-        console.log("📊 Starting workflow: " + workflowName + " (" + workflowId + ")");
-      }
-
-      const workflowAttributes = {
-        'langfuse.type': 'workflow',
-        'langfuse.name': workflowName,
-        'n8n.workflow.id': workflowId,
-        'n8n.workflow.name': workflowName,
-        'n8n.service': 'workflow-engine',
-        ...flat(wfData?.settings ?? {}, { 
-          delimiter: '.', 
-          transformKey: (key) => 'n8n.workflow.settings.' + key
-        }),
-      };
+      console.log(`📊 Starting workflow: ${workflowName} (${workflowId})`);
 
       const span = tracer.startSpan('n8n.workflow.execute', {
-        attributes: workflowAttributes,
+        attributes: {
+          'langfuse.trace.name': workflowName,
+          'n8n.workflow.name': workflowName,
+          'n8n.workflow.id': workflowId,
+          'n8n.service': 'workflow-engine'
+        },
         kind: SpanKind.INTERNAL
       });
 
@@ -419,64 +453,58 @@ function setupN8nInstrumentation() {
 
         cancelable.then(
           (result) => {
-            // Reduced logging - only log completions in debug mode
-            if (process.env.OTEL_LOG_LEVEL === 'debug') {
-              console.log("✅ Workflow completed successfully");
-            }
+            console.log("✅ Workflow completed successfully");
             
             const runData = result?.data?.resultData?.runData || {};
             const nodes = Array.isArray(wfData?.nodes) ? wfData.nodes : [];
             let llmNodeCount = 0;
             
-            // Process nodes and create child spans - use runData as primary source
-            if (process.env.OTEL_LOG_LEVEL === 'debug') {
-              console.log(`Processing ${nodes.length} nodes from wfData.nodes`);
-              console.log(`RunData has ${Object.keys(runData).length} executed nodes:`, Object.keys(runData));
-            }
+            // DEBUG: Log COMPLETE workflow structure
+            console.log(`=== COMPLETE WORKFLOW DEBUG ===`);
+            console.log(`Workflow: ${workflowName}`);
+            console.log(`Nodes from wfData.nodes: ${nodes.length}`);
+            console.log(`RunData executed nodes: ${Object.keys(runData).length}`);
+            console.log(`RunData keys: [${Object.keys(runData).map(k => `'${k}'`).join(', ')}]`);
             
-            // Process from runData (executed nodes) instead of wfData.nodes
+            // Process executed nodes from runData (not wfData.nodes)
             Object.keys(runData).forEach((nodeName, index) => {
-              const nodeRunData = runData[nodeName];
-              
-              // Try to find node definition in wfData.nodes, fallback to name-based detection
+              // Try to find node definition in wfData.nodes, fallback to name-based
               let nodeData = nodes.find(n => n.name === nodeName) || { 
                 name: nodeName, 
                 type: 'unknown', 
                 parameters: {} 
               };
               
-              if (process.env.OTEL_LOG_LEVEL === 'debug') {
-                console.log(`Node ${index}: ${nodeName} (${nodeData.type}) - hasRunData: ${!!nodeRunData}`);
-              }
+              const nodeRunData = runData[nodeName];
+              
+              console.log(`=== NODE ${index} DEBUG ===`);
+              console.log(`Name: ${nodeName}`);
+              console.log(`Type: ${nodeData.type}`);
+              console.log(`Has RunData: ${!!nodeRunData}`);
               
               if (nodeRunData) {
-                const llmData = extractLLMData(nodeData, nodeRunData);
-                
-                if (process.env.OTEL_LOG_LEVEL === 'debug') {
-                  console.log(`LLM Data for ${nodeName}:`, { 
-                    system: llmData.system, 
-                    model: llmData.model,
-                    hasInput: !!llmData.input,
-                    hasOutput: !!llmData.output 
-                  });
-                  
-                  // Debug: Log runData structure for LLM nodes
-                  if (llmData.system !== 'unknown') {
-                    console.log(`RunData structure for ${nodeName}:`, JSON.stringify({
-                      runDataLength: nodeRunData.length,
-                      firstRun: nodeRunData[0]?.data?.main ? 'has main data' : 'no main data',
-                      lastRun: nodeRunData[nodeRunData.length - 1]?.data?.main ? 'has main data' : 'no main data',
-                      firstRunKeys: nodeRunData[0] ? Object.keys(nodeRunData[0]) : 'no first run',
-                      firstRunDataKeys: nodeRunData[0]?.data ? Object.keys(nodeRunData[0].data) : 'no data',
-                      sampleFirstRun: nodeRunData[0] ? JSON.stringify(nodeRunData[0]).substring(0, 500) : 'none'
-                    }));
+                console.log(`RunData length: ${nodeRunData.length}`);
+                if (nodeRunData.length > 0) {
+                  const firstRun = nodeRunData[0];
+                  console.log(`First run keys: [${Object.keys(firstRun).join(', ')}]`);
+                  if (firstRun.data) {
+                    console.log(`First run data keys: [${Object.keys(firstRun.data).join(', ')}]`);
+                    
+                    // Log complete structure for AI nodes
+                    if (firstRun.data.ai_languageModel) {
+                      console.log(`=== AI_LANGUAGEMODEL COMPLETE STRUCTURE ===`);
+                      console.log(JSON.stringify(firstRun.data.ai_languageModel, null, 2));
+                      console.log(`=== END AI_LANGUAGEMODEL STRUCTURE ===`);
+                    }
                   }
                 }
+                
+                const llmData = extractLLMData(nodeData, nodeRunData);
                 
                 if (llmData.system !== 'unknown') {
                   llmNodeCount++;
                   
-                  // Create LLM span
+                  // Create a child span for the LLM operation
                   const llmSpan = tracer.startSpan('n8n.llm.generation', {
                     attributes: {
                       'n8n.node.name': nodeName,
@@ -491,6 +519,8 @@ function setupN8nInstrumentation() {
                   
                   llmSpan.setStatus({ code: SpanStatusCode.OK });
                   llmSpan.end();
+                  
+                  console.log(`🤖 Processed LLM node: ${nodeName} (${llmData.system})`);
                 } else {
                   // Create regular node span
                   const nodeSpan = tracer.startSpan('n8n.node.execute', {
@@ -510,7 +540,7 @@ function setupN8nInstrumentation() {
 
             span.setAttributes({
               'langfuse.status': 'success',
-              'n8n.workflow.nodes_executed': result?.data?.resultData?.runData ? Object.keys(result.data.resultData.runData).length : 0,
+              'n8n.workflow.nodes_executed': Object.keys(runData).length,
               'n8n.workflow.llm_nodes': llmNodeCount
             });
 
@@ -549,6 +579,7 @@ function setupN8nInstrumentation() {
     };
 
     console.log("✅ n8n instrumentation setup completed!");
+
   } catch (error) {
     console.error("❌ Failed to setup n8n instrumentation:", error);
   }
