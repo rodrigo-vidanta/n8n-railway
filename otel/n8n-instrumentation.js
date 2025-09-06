@@ -96,38 +96,97 @@ function setupN8nInstrumentation() {
               if (aiData && aiData.length > 0) {
                 const output = aiData[0]?.json;
                 if (output) {
-                  // Extract output text
+                  // Extract output text (múltiples formatos)
                   if (output.response?.generations?.[0]?.[0]?.text) {
                     llmData.output = output.response.generations[0][0].text;
+                  } else if (output.response?.content) {
+                    llmData.output = output.response.content;
                   } else if (output.content) {
                     llmData.output = output.content;
                   } else if (output.text) {
                     llmData.output = output.text;
+                  } else if (output.message?.content) {
+                    llmData.output = output.message.content;
                   }
                   
-                  // Extract model from response metadata
+                  // Extract input (buscar en múltiples ubicaciones)
+                  if (output.response?.prompt || output.prompt) {
+                    llmData.input = output.response?.prompt || output.prompt;
+                  } else if (output.response?.messages) {
+                    llmData.input = JSON.stringify(output.response.messages);
+                  } else if (output.messages) {
+                    llmData.input = JSON.stringify(output.messages);
+                  }
+                  
+                  // Extract modelo (múltiples ubicaciones)
                   if (output.response?.model) {
                     llmData.model = output.response.model;
                   } else if (output.response?.response_metadata?.model) {
                     llmData.model = output.response.response_metadata.model;
+                  } else if (output.model) {
+                    llmData.model = output.model;
+                  } else if (output.response_metadata?.model) {
+                    llmData.model = output.response_metadata.model;
                   }
 
-                  // Extract token usage
+                  // Extract token usage (múltiples formatos)
                   try {
+                    let usage = null;
+                    
+                    // LangChain Anthropic format
                     if (output.response?.response_metadata?.tokenUsage) {
-                      const usage = output.response.response_metadata.tokenUsage;
+                      usage = output.response.response_metadata.tokenUsage;
                       llmData.tokens = {
                         input: usage.promptTokens || usage.input_tokens || 0,
                         output: usage.completionTokens || usage.output_tokens || 0
                       };
-                    } else if (output.usage) {
+                    }
+                    // Standard OpenAI format
+                    else if (output.response?.usage) {
+                      usage = output.response.usage;
                       llmData.tokens = {
-                        input: output.usage.prompt_tokens || output.usage.input_tokens || 0,
-                        output: output.usage.completion_tokens || output.usage.output_tokens || 0
+                        input: usage.prompt_tokens || usage.input_tokens || 0,
+                        output: usage.completion_tokens || usage.output_tokens || 0
                       };
                     }
+                    // Direct usage object
+                    else if (output.usage) {
+                      usage = output.usage;
+                      llmData.tokens = {
+                        input: usage.prompt_tokens || usage.input_tokens || 0,
+                        output: usage.completion_tokens || usage.output_tokens || 0
+                      };
+                    }
+                    // Azure OpenAI format
+                    else if (output.response_metadata?.tokenUsage) {
+                      usage = output.response_metadata.tokenUsage;
+                      llmData.tokens = {
+                        input: usage.promptTokens || usage.input_tokens || 0,
+                        output: usage.completionTokens || usage.output_tokens || 0
+                      };
+                    }
+                    
+                    // Extract cost information if available
+                    if (usage?.cost || output.cost || output.response?.cost) {
+                      llmData.cost = usage?.cost || output.cost || output.response.cost;
+                    }
+                    
                   } catch (e) {
-                    // Ignore token extraction errors
+                    if (process.env.OTEL_LOG_LEVEL === 'debug') {
+                      console.log(`Error extracting tokens for ${nodeName}:`, e.message);
+                    }
+                  }
+                  
+                  // Extract tool usage if available
+                  try {
+                    if (output.response?.tool_calls || output.tool_calls) {
+                      llmData.toolCalls = output.response?.tool_calls || output.tool_calls;
+                    }
+                    if (output.response?.function_call || output.function_call) {
+                      llmData.functionCall = output.response?.function_call || output.function_call;
+                    }
+                  } catch (e) {
+                    // Ignore tool extraction errors
                   }
                 }
               }
@@ -197,45 +256,126 @@ function setupN8nInstrumentation() {
           }
         }
 
-        // Input/Output
+        // Input/Output with Langfuse specific attributes
         if (llmData.input) {
           span.setAttributes({
-            'gen_ai.prompt': llmData.input.substring(0, 1000) // Limit size
+            'gen_ai.prompt': llmData.input.substring(0, 1000), // OpenTelemetry standard
+            'langfuse.generation.input': llmData.input.substring(0, 2000) // Langfuse specific
           });
         }
 
         if (llmData.output) {
           span.setAttributes({
-            'gen_ai.completion': llmData.output.substring(0, 1000) // Limit size
+            'gen_ai.completion': llmData.output.substring(0, 1000), // OpenTelemetry standard
+            'langfuse.generation.output': llmData.output.substring(0, 2000) // Langfuse specific
           });
         }
 
-        // Token usage
-        if (llmData.tokens) {
+        // Token usage with Langfuse attributes
+        if (llmData.tokens && (llmData.tokens.input > 0 || llmData.tokens.output > 0)) {
+          const inputTokens = llmData.tokens.input || 0;
+          const outputTokens = llmData.tokens.output || 0;
+          const totalTokens = inputTokens + outputTokens;
+          
           span.setAttributes({
-            'gen_ai.usage.input_tokens': llmData.tokens.input,
-            'gen_ai.usage.output_tokens': llmData.tokens.output
+            'gen_ai.usage.input_tokens': inputTokens,
+            'gen_ai.usage.output_tokens': outputTokens,
+            'gen_ai.usage.total_tokens': totalTokens,
+            // Langfuse specific token attributes
+            'langfuse.generation.usage.input': inputTokens,
+            'langfuse.generation.usage.output': outputTokens,
+            'langfuse.generation.usage.total': totalTokens
+          });
+        }
+        
+        // Cost information
+        if (llmData.cost) {
+          span.setAttributes({
+            'gen_ai.usage.cost': llmData.cost,
+            'langfuse.generation.cost': llmData.cost
+          });
+        }
+        
+        // Tool usage information
+        if (llmData.toolCalls && llmData.toolCalls.length > 0) {
+          span.setAttributes({
+            'gen_ai.tool.calls': JSON.stringify(llmData.toolCalls).substring(0, 1000),
+            'langfuse.generation.tools.used': llmData.toolCalls.length
+          });
+        }
+        
+        if (llmData.functionCall) {
+          span.setAttributes({
+            'gen_ai.function.call': JSON.stringify(llmData.functionCall).substring(0, 1000)
           });
         }
 
-        // Model parameters from node configuration
+        // Model parameters from node configuration (extendido)
         if (nodeData?.parameters) {
           const params = nodeData.parameters;
-          if (params.temperature !== undefined) {
-            span.setAttributes({ 'gen_ai.request.temperature': params.temperature });
-          }
-          if (params.max_tokens !== undefined || params.maxTokens !== undefined) {
+          const options = params.options || {};
+          
+          // Temperature
+          if (params.temperature !== undefined || options.temperature !== undefined) {
             span.setAttributes({ 
-              'gen_ai.request.max_tokens': params.max_tokens || params.maxTokens 
+              'gen_ai.request.temperature': params.temperature || options.temperature 
             });
           }
-          if (params.top_p !== undefined || params.topP !== undefined) {
+          
+          // Max tokens (múltiples nombres)
+          const maxTokens = params.max_tokens || params.maxTokens || options.maxTokens || 
+                           options.max_tokens || options.maxTokensToSample || options.maxOutputTokens;
+          if (maxTokens !== undefined && maxTokens > 0) {
+            span.setAttributes({ 'gen_ai.request.max_tokens': maxTokens });
+          }
+          
+          // Top P
+          if (params.top_p !== undefined || params.topP !== undefined || options.top_p !== undefined) {
             span.setAttributes({ 
-              'gen_ai.request.top_p': params.top_p || params.topP 
+              'gen_ai.request.top_p': params.top_p || params.topP || options.top_p 
             });
           }
-          if (params.stream !== undefined) {
-            span.setAttributes({ 'gen_ai.request.is_stream': params.stream });
+          
+          // Streaming
+          if (params.stream !== undefined || options.stream !== undefined) {
+            span.setAttributes({ 
+              'gen_ai.request.is_stream': params.stream || options.stream 
+            });
+          }
+          
+          // Frequency penalty
+          if (params.frequency_penalty !== undefined || options.frequency_penalty !== undefined) {
+            span.setAttributes({ 
+              'gen_ai.request.frequency_penalty': params.frequency_penalty || options.frequency_penalty 
+            });
+          }
+          
+          // Presence penalty
+          if (params.presence_penalty !== undefined || options.presence_penalty !== undefined) {
+            span.setAttributes({ 
+              'gen_ai.request.presence_penalty': params.presence_penalty || options.presence_penalty 
+            });
+          }
+          
+          // Model specific parameters
+          const modelParams = {
+            temperature: params.temperature || options.temperature,
+            max_tokens: maxTokens,
+            top_p: params.top_p || params.topP || options.top_p,
+            stream: params.stream || options.stream,
+            frequency_penalty: params.frequency_penalty || options.frequency_penalty,
+            presence_penalty: params.presence_penalty || options.presence_penalty
+          };
+          
+          // Remove undefined values
+          Object.keys(modelParams).forEach(key => {
+            if (modelParams[key] === undefined) delete modelParams[key];
+          });
+          
+          if (Object.keys(modelParams).length > 0) {
+            span.setAttributes({
+              'langfuse.generation.modelParameters': JSON.stringify(modelParams)
+            });
           }
         }
 
