@@ -79,8 +79,12 @@ function setupN8nInstrumentation() {
         console.log(`Is AI: ${isAINode}`);
 
         if (isAINode) {
-          // Extract model information
-          llmData.model = parameters?.model || parameters?.options?.model || parameters?.modelName || 'unknown';
+          // Extract model information (múltiples ubicaciones)
+          llmData.model = parameters?.model || 
+                         parameters?.options?.model || 
+                         parameters?.modelName ||
+                         parameters?.deployment || // Azure OpenAI usa deployment
+                         'unknown';
           llmData.system = detectAISystem(llmData.model, nodeType, nodeName);
 
           // Extract input from parameters
@@ -139,12 +143,20 @@ function setupN8nInstrumentation() {
                     llmData.model = output.response_metadata.model;
                   }
 
-                  // Extract token usage (múltiples formatos)
+                  // Extract token usage (estructura REAL de Azure OpenAI)
                   try {
                     let usage = null;
                     
+                    // Azure OpenAI format (estructura real encontrada)
+                    if (output.tokenUsage) {
+                      usage = output.tokenUsage;
+                      llmData.tokens = {
+                        input: usage.promptTokens || usage.input_tokens || 0,
+                        output: usage.completionTokens || usage.output_tokens || 0
+                      };
+                    }
                     // LangChain Anthropic format
-                    if (output.response?.response_metadata?.tokenUsage) {
+                    else if (output.response?.response_metadata?.tokenUsage) {
                       usage = output.response.response_metadata.tokenUsage;
                       llmData.tokens = {
                         input: usage.promptTokens || usage.input_tokens || 0,
@@ -167,7 +179,7 @@ function setupN8nInstrumentation() {
                         output: usage.completion_tokens || usage.output_tokens || 0
                       };
                     }
-                    // Azure OpenAI format
+                    // Response metadata format
                     else if (output.response_metadata?.tokenUsage) {
                       usage = output.response_metadata.tokenUsage;
                       llmData.tokens = {
